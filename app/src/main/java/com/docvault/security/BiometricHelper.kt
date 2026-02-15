@@ -4,6 +4,7 @@ package com.docvault.security
 
 import android.content.Context
 import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -15,16 +16,20 @@ import androidx.fragment.app.FragmentActivity
 class BiometricHelper(private val context: Context) {
 
     /**
-     * Check if the device supports biometric authentication.
+     * Check if the device supports biometric authentication and has fingerprints enrolled.
      */
     fun isBiometricAvailable(): Boolean {
         val biometricManager = BiometricManager.from(context)
-        return when (biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG
-        )) {
-            BiometricManager.BIOMETRIC_SUCCESS -> true
-            else -> false
-        }
+        return biometricManager.canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+    }
+
+    /**
+     * Check if hardware exists but no biometrics are enrolled.
+     * This is useful for prompting the user to set up biometrics.
+     */
+    fun isHardwareAvailableButNotEnrolled(): Boolean {
+        val biometricManager = BiometricManager.from(context)
+        return biometricManager.canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED
     }
 
     /**
@@ -36,7 +41,7 @@ class BiometricHelper(private val context: Context) {
      */
     fun authenticate(
         activity: FragmentActivity,
-        onSuccess: () -> Unit,
+        onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
         onError: (String) -> Unit
     ) {
         val executor = ContextCompat.getMainExecutor(context)
@@ -46,7 +51,7 @@ class BiometricHelper(private val context: Context) {
                 result: BiometricPrompt.AuthenticationResult
             ) {
                 super.onAuthenticationSucceeded(result)
-                onSuccess()
+                onSuccess(result)
             }
 
             override fun onAuthenticationError(
@@ -54,20 +59,26 @@ class BiometricHelper(private val context: Context) {
                 errString: CharSequence
             ) {
                 super.onAuthenticationError(errorCode, errString)
-                if (errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
-                    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
-                    errorCode == BiometricPrompt.ERROR_CANCELED
-                ) {
-                    onError("USE_PIN")  // signal to show PIN input instead
-                } else {
-                    onError(errString.toString())
+                when (errorCode) {
+                    BiometricPrompt.ERROR_USER_CANCELED,
+                    BiometricPrompt.ERROR_NEGATIVE_BUTTON -> {
+                        onError("USE_PIN") // User chose to use PIN
+                    }
+                    BiometricPrompt.ERROR_LOCKOUT -> {
+                        onError("Too many attempts. Try again later.")
+                    }
+                    BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> {
+                        onError("Biometrics disabled. Use PIN.")
+                    }
+                    else -> {
+                        onError(errString.toString())
+                    }
                 }
             }
 
             override fun onAuthenticationFailed() {
                 super.onAuthenticationFailed()
-                // Don't call onError here — system shows its own message
-                // User can retry. onError is called only on final failure.
+                // System shows its own message. No need to call onError here.
             }
         }
 
@@ -75,11 +86,10 @@ class BiometricHelper(private val context: Context) {
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock DocVault")
-            .setSubtitle("Use your fingerprint to access documents")
+            .setSubtitle("Authenticate to access your secure documents")
             .setNegativeButtonText("Use PIN instead")
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_STRONG
-            )
+            .setAllowedAuthenticators(BIOMETRIC_STRONG)
+            .setConfirmationRequired(false) // For face unlock, don't require a confirmation press
             .build()
 
         biometricPrompt.authenticate(promptInfo)

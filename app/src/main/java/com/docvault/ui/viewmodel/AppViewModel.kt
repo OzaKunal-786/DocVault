@@ -1,6 +1,3 @@
-// File: app/src/main/java/com/docvault/ui/viewmodel/AppViewModel.kt
-// STATUS: BRAND NEW FILE — create it
-
 package com.docvault.ui.viewmodel
 
 import androidx.compose.runtime.getValue
@@ -11,152 +8,143 @@ import com.docvault.DocVaultApplication
 
 /**
  * The "brain" of the app.
- *
- * It keeps track of what screen should be showing
- * and handles all the logic for locking/unlocking.
- *
- * "sealed class" = a fixed list of options. The screen can ONLY be
- * one of these three. Nothing else. This prevents bugs.
+ * Keeps track of what screen should be showing.
  */
 sealed class AppScreen {
     /** First-time user: needs to create a PIN */
     object PinSetup : AppScreen()
-
-    /** Returning user: needs to unlock with PIN or fingerprint */
+    
+    /** Returning user: needs to unlock */
     object Lock : AppScreen()
-
-    /** User is in: show the main app */
+    
+    /** User is unlocked */
     object Home : AppScreen()
 }
 
 class AppViewModel : ViewModel() {
 
-    // Get references to the security tools
-    private val app = DocVaultApplication.instance
-    private val pinManager = app.pinManager
-    private val autoLockManager = app.autoLockManager
-
-    // ── What screen is currently showing ────────────────
-    // "mutableStateOf" = whenever this value changes,
-    // the screen automatically updates. Like magic.
+    // What screen is showing
     var currentScreen by mutableStateOf<AppScreen>(AppScreen.Lock)
-        private set  // only this ViewModel can change it
-
-    // ── Error message for wrong PIN ─────────────────────
+        private set
+    
+    // Error message for wrong PIN or biometric issues
     var pinError by mutableStateOf<String?>(null)
         private set
-
-    // ── Should we show the fingerprint button? ──────────
+    
+    // Show fingerprint button?
     var showBiometric by mutableStateOf(false)
         private set
-
-    // ── This runs when the ViewModel is first created ───
+    
+    // This runs when ViewModel is created
     init {
         decideFirstScreen()
     }
-
+    
     /**
      * Decide which screen to show when app opens.
-     *
-     * If user has never set a PIN → show PIN setup
-     * If user has a PIN → show lock screen
      */
     private fun decideFirstScreen() {
+        val app = DocVaultApplication.instance
+        val pinManager = app.pinManager
+        
         if (pinManager.isPinSet()) {
-            // User has a PIN — show lock screen
+            // User has a PIN – show lock screen
             currentScreen = AppScreen.Lock
-
-            // Check if fingerprint is available AND enabled
-            showBiometric = pinManager.isBiometricEnabled() &&
+            
+            // Check if fingerprint available and enabled by user
+            showBiometric = pinManager.isBiometricEnabled() && 
                     app.biometricHelper.isBiometricAvailable()
         } else {
-            // First time user — show PIN setup
+            // First time – show PIN setup
             currentScreen = AppScreen.PinSetup
         }
     }
-
-    // ═══════════════════════════════════════════════════
-    // ACTIONS (called by the screens when user does something)
-    // ═══════════════════════════════════════════════════
-
+    
+    // ── User Actions ────────────────────────────────────
+    
     /**
-     * Called when user creates a PIN for the first time.
-     * Saves the PIN and takes user to home screen.
+     * User creates PIN for first time
      */
     fun onPinCreated(pin: String) {
-        pinManager.setPin(pin)
-        autoLockManager.onUnlocked()
+        val app = DocVaultApplication.instance
+        app.pinManager.setPin(pin)
+        app.autoLockManager.onUnlocked()
         currentScreen = AppScreen.Home
     }
-
+    
     /**
-     * Called when user enters PIN on the lock screen.
-     * Checks if it's correct.
+     * User enters PIN on lock screen
      */
     fun onPinEntered(pin: String) {
-        if (pinManager.verifyPin(pin)) {
-            // Correct PIN!
+        val app = DocVaultApplication.instance
+        
+        if (app.pinManager.verifyPin(pin)) {
+            // Correct!
             pinError = null
-            autoLockManager.onUnlocked()
+            app.autoLockManager.onUnlocked()
             currentScreen = AppScreen.Home
         } else {
             // Wrong PIN
             pinError = "Wrong PIN. Try again."
         }
     }
-
+    
     /**
-     * Called when fingerprint authentication succeeds.
+     * Fingerprint succeeded
      */
     fun onBiometricSuccess() {
+        val app = DocVaultApplication.instance
         pinError = null
-        autoLockManager.onUnlocked()
+        app.autoLockManager.onUnlocked()
         currentScreen = AppScreen.Home
     }
-
+    
     /**
-     * Called when fingerprint authentication fails or is cancelled.
+     * Fingerprint failed or cancelled
      */
     fun onBiometricError(error: String) {
         if (error == "USE_PIN") {
-            // User tapped "Use PIN instead" — just hide fingerprint button
-            // They can still use the number pad
+            // User tapped "Use PIN instead" - just hide biometric button for this session
             showBiometric = false
+            pinError = null
+        } else {
+            // Show the actual error (e.g. "Too many attempts")
+            pinError = error
         }
-        // For other errors, do nothing — user can still type PIN
     }
-
+    
     /**
-     * Called when user enables biometric during PIN setup.
+     * User enables biometric during setup
      */
     fun onBiometricEnabled() {
-        pinManager.setBiometricEnabled(true)
-        showBiometric = true
+        val app = DocVaultApplication.instance
+        app.pinManager.setBiometricEnabled(true)
+        showBiometric = app.biometricHelper.isBiometricAvailable()
     }
-
-    // ═══════════════════════════════════════════════════
-    // AUTO-LOCK (called by MainActivity lifecycle)
-    // ═══════════════════════════════════════════════════
-
+    
+    // ── Auto-Lock ───────────────────────────────────────
+    
     /**
-     * Called when user leaves the app (switches to another app).
-     * Starts the lock timer.
+     * User leaves the app
      */
     fun onAppPaused() {
         if (currentScreen == AppScreen.Home) {
-            autoLockManager.onAppBackgrounded()
+            val app = DocVaultApplication.instance
+            app.autoLockManager.onAppBackgrounded()
         }
     }
-
+    
     /**
-     * Called when user comes back to the app.
-     * If they were gone too long, lock the app.
+     * User returns to the app
      */
     fun onAppResumed() {
-        if (currentScreen == AppScreen.Home && autoLockManager.shouldLock()) {
-            // User was away too long — lock the app
+        val app = DocVaultApplication.instance
+        
+        if (currentScreen == AppScreen.Home && app.autoLockManager.shouldLock()) {
+            // User was away too long – lock it
             currentScreen = AppScreen.Lock
-            showBiometric = pinManager.isBiometricEnabled() &&
+            pinError = null
+            showBiometric = app.pinManager.isBiometricEnabled() && 
                     app.biometricHelper.isBiometricAvailable()
         }
     }

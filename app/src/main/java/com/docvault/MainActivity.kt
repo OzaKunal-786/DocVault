@@ -68,7 +68,7 @@ class MainActivity : FragmentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     // Show different screen based on app state
-                    when (viewModel.currentScreen) {
+                    when (val screen = viewModel.currentScreen) {
 
                         // ── FIRST TIME: Create a PIN ────────
                         is AppScreen.PinSetup -> {
@@ -121,7 +121,8 @@ class MainActivity : FragmentActivity() {
         val app = application as DocVaultApplication
         app.biometricHelper.authenticate(
             activity = this,
-            onSuccess = {
+            onSuccess = { _ ->
+                // result contains crypto object if we used one
                 viewModel.onBiometricSuccess()
             },
             onError = { error ->
