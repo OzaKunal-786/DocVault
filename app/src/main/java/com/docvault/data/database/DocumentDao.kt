@@ -8,21 +8,18 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface DocumentDao {
 
-    // ── INSERT ──────────────────────────────────────────
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocument(document: DocumentEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocuments(documents: List<DocumentEntity>)
 
-    // ── QUERY ALL ───────────────────────────────────────
     @Query("SELECT * FROM documents ORDER BY importDate DESC")
     fun getAllDocuments(): Flow<List<DocumentEntity>>
 
     @Query("SELECT * FROM documents ORDER BY importDate DESC")
     suspend fun getAllDocumentsOnce(): List<DocumentEntity>
 
-    // ── QUERY BY CATEGORY ───────────────────────────────
     @Query("""
         SELECT * FROM documents 
         WHERE category = :category 
@@ -31,24 +28,20 @@ interface DocumentDao {
     """)
     fun getDocumentsByCategory(category: String): Flow<List<DocumentEntity>>
 
-    // ── QUERY BY ID ─────────────────────────────────────
     @Query("SELECT * FROM documents WHERE id = :id")
     suspend fun getDocumentById(id: String): DocumentEntity?
 
-    // ── SEARCH ──────────────────────────────────────────
+    /**
+     * High-performance Full-Text Search using FTS4.
+     */
     @Query("""
-        SELECT * FROM documents 
-        WHERE title LIKE '%' || :query || '%' 
-        OR extractedText LIKE '%' || :query || '%'
-        OR category LIKE '%' || :query || '%'
-        OR userCategory LIKE '%' || :query || '%'
-        OR userTitle LIKE '%' || :query || '%'
-        OR metadata LIKE '%' || :query || '%'
+        SELECT documents.* FROM documents
+        JOIN document_fts ON documents.id = document_fts.rowid
+        WHERE document_fts MATCH :query
         ORDER BY importDate DESC
     """)
     fun searchDocuments(query: String): Flow<List<DocumentEntity>>
 
-    // ── CATEGORY COUNTS ─────────────────────────────────
     @Query("""
         SELECT 
             CASE 
@@ -61,15 +54,12 @@ interface DocumentDao {
     """)
     fun getCategoryCounts(): Flow<List<CategoryCount>>
 
-    // ── DUPLICATE CHECK ─────────────────────────────────
     @Query("SELECT EXISTS(SELECT 1 FROM documents WHERE originalHash = :hash)")
     suspend fun existsByHash(hash: String): Boolean
 
-    // ── RECENT DOCUMENTS ────────────────────────────────
     @Query("SELECT * FROM documents ORDER BY importDate DESC LIMIT :limit")
     fun getRecentDocuments(limit: Int = 10): Flow<List<DocumentEntity>>
 
-    // ── UPDATE ──────────────────────────────────────────
     @Update
     suspend fun updateDocument(document: DocumentEntity)
 
@@ -101,7 +91,6 @@ interface DocumentDao {
     """)
     suspend fun updateLastAccessed(id: String, timestamp: Long = System.currentTimeMillis())
 
-    // ── DELETE ───────────────────────────────────────────
     @Delete
     suspend fun deleteDocument(document: DocumentEntity)
 
@@ -111,7 +100,6 @@ interface DocumentDao {
     @Query("DELETE FROM documents")
     suspend fun deleteAllDocuments()
 
-    // ── STATS ───────────────────────────────────────────
     @Query("SELECT COUNT(*) FROM documents")
     fun getTotalCount(): Flow<Int>
 
@@ -122,9 +110,6 @@ interface DocumentDao {
     fun getUnprocessedCount(): Flow<Int>
 }
 
-/**
- * Helper data class for category count query results
- */
 data class CategoryCount(
     val effectiveCategory: String,
     val count: Int

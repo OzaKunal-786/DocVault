@@ -3,61 +3,58 @@
 package com.docvault.data.database
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-@Entity(tableName = "documents")
+@Entity(
+    tableName = "documents",
+    indices = [
+        Index(value = ["category"]),
+        Index(value = ["importDate"]),
+        Index(value = ["originalHash"], unique = true) // Fast duplicate detection
+    ]
+)
 data class DocumentEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
 
     // Original file info
-    val originalPath: String,           // where the file was found
-    val originalFileName: String,       // original filename
-    val originalHash: String,           // MD5 hash for duplicate detection
+    val originalPath: String,
+    val originalFileName: String,
+    val originalHash: String,
 
     // Vault storage
-    val vaultFileName: String,          // encrypted file name in vault
-    val thumbnailFileName: String?,     // encrypted thumbnail name
+    val vaultFileName: String,
+    val thumbnailFileName: String?,
 
     // AI-generated info
-    val title: String,                  // AI-generated meaningful title
-    val category: String,               // AI-assigned category
-    val extractedText: String,          // full OCR text (for search)
-    val metadata: String,               // JSON: date, amount, vendor, etc.
-    val aiConfidence: Float,            // 0.0 to 1.0 — how sure AI was
+    val title: String,
+    val category: String,
+    val extractedText: String,
+    val metadata: String,
+    val aiConfidence: Float,
 
     // User corrections
     val isUserCorrected: Boolean = false,
-    val userCategory: String? = null,   // if user changed category
-    val userTitle: String? = null,      // if user renamed
+    val userCategory: String? = null,
+    val userTitle: String? = null,
 
     // File info
-    val fileSize: Long,                 // in bytes
-    val mimeType: String,               // image/jpeg, application/pdf, etc.
-    val sourceFolder: String,           // Downloads, WhatsApp, Camera, etc.
-    val pageCount: Int = 1,             // number of pages in PDF
+    val fileSize: Long,
+    val mimeType: String,
+    val sourceFolder: String,
+    val pageCount: Int = 1,
 
     // Timestamps
     val importDate: Long = System.currentTimeMillis(),
-    val documentDate: Long? = null,     // date found ON the document
+    val documentDate: Long? = null,
     val lastAccessedDate: Long? = null,
 
     // Status
-    val isProcessed: Boolean = false,   // OCR + categorization complete?
+    val isProcessed: Boolean = false,
     val isFavorite: Boolean = false
 ) {
-    /**
-     * Returns the effective category — user's correction takes priority
-     */
-    fun effectiveCategory(): String {
-        return userCategory ?: category
-    }
-
-    /**
-     * Returns the effective title — user's rename takes priority
-     */
-    fun effectiveTitle(): String {
-        return userTitle ?: title
-    }
+    fun effectiveCategory(): String = userCategory ?: category
+    fun effectiveTitle(): String = userTitle ?: title
 }

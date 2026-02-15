@@ -9,7 +9,10 @@ import androidx.room.RoomDatabase
 import net.sqlcipher.database.SupportFactory
 
 @Database(
-    entities = [DocumentEntity::class],
+    entities = [
+        DocumentEntity::class,
+        DocumentFtsEntity::class
+    ],
     version = 1,
     exportSchema = true
 )
@@ -25,11 +28,6 @@ abstract class AppDatabase : RoomDatabase() {
 
         /**
          * Get (or create) the encrypted database instance.
-         *
-         * @param context Application context
-         * @param passphrase The encryption key — derived from user's PIN
-         *                   combined with device-specific Android Keystore key.
-         *                   This is NOT the raw PIN — see EncryptionManager.
          */
         fun getInstance(context: Context, passphrase: ByteArray): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -40,7 +38,6 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private fun buildDatabase(context: Context, passphrase: ByteArray): AppDatabase {
-            // SQLCipher factory encrypts the entire database file
             val supportFactory = SupportFactory(passphrase)
 
             return Room.databaseBuilder(
@@ -48,15 +45,11 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 DATABASE_NAME
             )
-                .openHelperFactory(supportFactory)  // THIS is what encrypts it
-                .fallbackToDestructiveMigration()    // for v1, OK to reset on schema change
+                .openHelperFactory(supportFactory)
+                .fallbackToDestructiveMigration()
                 .build()
         }
 
-        /**
-         * Close database when app is being destroyed.
-         * Important for SQLCipher to properly clean up.
-         */
         fun closeDatabase() {
             INSTANCE?.close()
             INSTANCE = null

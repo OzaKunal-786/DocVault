@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "f8748a60b769a9e5274e48706dba5215",
+    "identityHash": "c4ae1fc107b0038eaf47b83e223c97e1",
     "entities": [
       {
         "tableName": "documents",
@@ -153,6 +153,87 @@
             "id"
           ]
         },
+        "indices": [
+          {
+            "name": "index_documents_category",
+            "unique": false,
+            "columnNames": [
+              "category"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_documents_category` ON `${TABLE_NAME}` (`category`)"
+          },
+          {
+            "name": "index_documents_importDate",
+            "unique": false,
+            "columnNames": [
+              "importDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_documents_importDate` ON `${TABLE_NAME}` (`importDate`)"
+          },
+          {
+            "name": "index_documents_originalHash",
+            "unique": true,
+            "columnNames": [
+              "originalHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_documents_originalHash` ON `${TABLE_NAME}` (`originalHash`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "ftsVersion": "FTS4",
+        "ftsOptions": {
+          "tokenizer": "simple",
+          "tokenizerArgs": [],
+          "contentTable": "documents",
+          "languageIdColumnName": "",
+          "matchInfo": "FTS4",
+          "notIndexedColumns": [],
+          "prefixSizes": [],
+          "preferredOrder": "ASC"
+        },
+        "contentSyncTriggers": [
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_document_fts_BEFORE_UPDATE BEFORE UPDATE ON `documents` BEGIN DELETE FROM `document_fts` WHERE `docid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_document_fts_BEFORE_DELETE BEFORE DELETE ON `documents` BEGIN DELETE FROM `document_fts` WHERE `docid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_document_fts_AFTER_UPDATE AFTER UPDATE ON `documents` BEGIN INSERT INTO `document_fts`(`docid`, `title`, `extractedText`, `category`, `metadata`) VALUES (NEW.`rowid`, NEW.`title`, NEW.`extractedText`, NEW.`category`, NEW.`metadata`); END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_document_fts_AFTER_INSERT AFTER INSERT ON `documents` BEGIN INSERT INTO `document_fts`(`docid`, `title`, `extractedText`, `category`, `metadata`) VALUES (NEW.`rowid`, NEW.`title`, NEW.`extractedText`, NEW.`category`, NEW.`metadata`); END"
+        ],
+        "tableName": "document_fts",
+        "createSql": "CREATE VIRTUAL TABLE IF NOT EXISTS `${TABLE_NAME}` USING FTS4(`title` TEXT NOT NULL, `extractedText` TEXT NOT NULL, `category` TEXT NOT NULL, `metadata` TEXT NOT NULL, content=`documents`)",
+        "fields": [
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "extractedText",
+            "columnName": "extractedText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadata",
+            "columnName": "metadata",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": []
+        },
         "indices": [],
         "foreignKeys": []
       }
@@ -160,7 +241,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f8748a60b769a9e5274e48706dba5215')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c4ae1fc107b0038eaf47b83e223c97e1')"
     ]
   }
 }

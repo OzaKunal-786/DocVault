@@ -100,6 +100,7 @@ implementation(libs.coil.compose)
 
 // Coroutines
 implementation(libs.kotlinx.coroutines.android)
+implementation(libs.kotlinx.coroutines.play.services)
 
 // Testing
 testImplementation(libs.junit)

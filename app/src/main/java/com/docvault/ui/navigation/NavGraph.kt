@@ -1,33 +1,76 @@
 ﻿package com.docvault.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import com.docvault.ui.screens.HomeScreen
+import com.docvault.ui.screens.SearchScreen
+import com.docvault.ui.screens.SettingsScreen
+import com.docvault.ui.viewmodel.AppViewModel
+import com.docvault.ui.viewmodel.SearchViewModel
+import com.docvault.DocVaultApplication
 
 /**
- * Navigation graph for the app.
- *
- * For now (Week 1), navigation is handled directly
- * in MainActivity using the AppViewModel state.
- *
- * We will add proper Compose Navigation in Week 2
- * when we have more screens to navigate between
- * (category detail, document viewer, etc.)
- *
- * WHY NOT USE IT NOW?
- * Our current flow is simple:
- *   PinSetup → Lock → Home
- * This is handled by AppViewModel switching states.
- * Adding Navigation framework for just 3 screens
- * would be overcomplicating things.
+ * Navigation routes for the app.
  */
-
-// Navigation route names (we'll use these in Week 2)
 object Routes {
-    const val PIN_SETUP = "pin_setup"
-    const val LOCK = "lock"
     const val HOME = "home"
     const val SEARCH = "search"
     const val SETTINGS = "settings"
-    const val DOCUMENT_VIEWER = "document_viewer/{documentId}"
-    const val CATEGORY_DETAIL = "category/{categoryName}"
-    const val SCAN_RESULTS = "scan_results"
+}
+
+@Composable
+fun AppNavGraph(
+    navController: NavHostController,
+    appViewModel: AppViewModel
+) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.HOME
+    ) {
+        composable(Routes.HOME) {
+            HomeScreen(
+                categories = emptyList(), // TODO: Connect to VM in Week 8
+                recentDocuments = emptyList(), // TODO: Connect to VM in Week 8
+                onCategoryClick = { category -> 
+                    // TODO: Navigate to category detail in Week 2
+                },
+                onSearchClick = { navController.navigate(Routes.SEARCH) },
+                onAddCameraClick = { /* TODO: Trigger Camera */ },
+                onAddFileClick = { /* TODO: Trigger File Picker */ },
+                onDocumentClick = { docId ->
+                    // TODO: Navigate to viewer in Week 3
+                }
+            )
+        }
+        
+        composable(Routes.SEARCH) {
+            val searchViewModel: SearchViewModel = viewModel(
+                factory = SearchViewModelFactory(DocVaultApplication.instance.repository)
+            )
+            SearchScreen(
+                viewModel = searchViewModel,
+                onBackClick = { navController.popBackStack() },
+                onDocumentClick = { docId -> /* Open viewer */ }
+            )
+        }
+        
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                viewModel = appViewModel,
+                onBackupClick = { /* Trigger backup */ },
+                onRestoreClick = { /* Trigger restore */ },
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+    }
+}
+
+// Simple Factory for SearchViewModel since we aren't using Dagger/Hilt yet
+class SearchViewModelFactory(private val repository: com.docvault.data.repository.DocumentRepository) : androidx.lifecycle.ViewModelProvider.Factory {
+    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+        return SearchViewModel(repository) as T
+    }
 }

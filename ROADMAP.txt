@@ -1,0 +1,749 @@
+My project is on path - C:\DocVault\Project\ 
+
+github repo - https://github.com/OzaKunal-786/DocVault/
+
+---
+
+## PRODUCT CONTEXT
+
+I am building an Android mobile application called **DocVault**.
+
+It is an **offline-first, AI-powered document organizer** that:
+
+* Scans a user's phone for documents
+* Converts them to PDF (if needed)
+* Encrypts everything locally
+* Extracts text using on-device OCR
+* Automatically categorizes documents
+* Allows full-text search
+* Never sends any data to the cloud
+
+The core philosophy is:
+
+> “Your documents, organized by AI — but everything stays on your device.”
+
+---
+
+## TARGET USERS
+
+* Privacy-conscious users
+* People overwhelmed by scattered documents
+* Users receiving documents via WhatsApp, Downloads, Camera
+* Anyone who wants automatic organization without cloud dependency
+
+---
+
+## CORE PRINCIPLES
+
+1. 100% local processing
+2. No cloud sync
+3. No account required
+4. No data collection
+5. Biometric + PIN protection
+6. Encrypted database and encrypted files
+7. English-only OCR for v1
+8. Simple, fast, minimal UI
+
+---
+
+## TECH STACK
+
+* Kotlin
+* Jetpack Compose
+* Room + SQLCipher (encrypted DB)
+* AES-256 encrypted file storage
+* Android Keystore for key storage
+* Google ML Kit (on-device OCR)
+* TensorFlow Lite (optional classifier)
+* Android PdfDocument API
+* Min SDK 26
+
+---
+
+## MVP FEATURE SET (V1)
+
+### 1. Document Discovery
+
+* Scan Downloads, Documents, DCIM, WhatsApp
+* Scan images, PDFs, Office files
+* Duplicate detection via MD5
+* Filter out memes and small files
+
+---
+
+### 2. Import Pipeline
+
+When importing a document:
+
+1. Convert image to PDF (if needed)
+2. Run OCR on image or scanned PDF
+3. Extract metadata (dates, amounts, names, document numbers)
+4. Auto-generate a meaningful filename
+5. Auto-categorize using keyword rules (and optionally ML)
+6. Encrypt file with AES-256
+7. Store in encrypted local database
+8. Optionally delete original
+
+---
+
+### 3. AI Capabilities
+
+#### OCR
+
+* Extract text from images and PDFs
+* Fallback to bitmap rendering if scanned PDF
+
+#### Metadata Extraction
+
+* Regex-based:
+
+  * Dates
+  * Currency
+  * Names
+  * Invoice / policy numbers
+
+#### Title Generation
+
+Rule-based naming:
+
+* Vendor + Type + Date
+  Example:
+* Amazon_Receipt_Jun2025.pdf
+* Passport_JohnDoe.pdf
+
+#### Auto Categorization
+
+Categories:
+
+* ID & Personal
+* Financial
+* Receipts
+* Medical
+* Education
+* Vehicle
+* Property
+* Other
+
+Primary method:
+
+* Weighted keyword scoring
+
+Optional method:
+
+* TFLite classifier
+* Fallback to keyword model
+
+User corrections are stored for future AI improvement.
+
+---
+
+### 4. Security Model
+
+* Biometric lock
+* PIN fallback
+* Auto-lock after background timeout
+* SQLCipher encrypted database
+* AES-256 encrypted files
+* Per-file encryption keys stored in Android Keystore
+* Encrypted backup ZIP file protected by PIN
+* No network dependency
+
+---
+
+### 5. Search
+
+* Full-text search (Room FTS4)
+* Search across:
+
+  * Title
+  * OCR text
+  * Category
+  * Metadata
+* Results < 200ms
+
+---
+
+### 6. Capture & Share
+
+User can:
+
+* Capture document via camera
+* Pick file from system
+* Share PDF/image TO DocVault
+* Share decrypted PDF FROM DocVault
+* Download decrypted copy to storage
+
+---
+
+### 7. Backup & Restore
+
+* Single encrypted ZIP export
+* Contains encrypted files + encrypted DB + metadata
+* Protected by user PIN
+* Fully offline restore
+* 30-day backup reminder
+
+---
+
+### 8. Monetization
+
+Freemium model:
+
+* Free: 10 documents
+* Pro: $4.99 one-time purchase
+* Unlimited documents
+* Google Play Billing (non-consumable)
+* Restore purchase option
+
+---
+
+## EXPLICITLY NOT INCLUDED IN V1
+
+* Cloud sync
+* Email scanning
+* Multi-language OCR
+* Family sharing
+* Expiry reminders
+* Background scheduled scanning
+
+---
+
+## PERFORMANCE TARGETS
+
+* App launch < 2 seconds
+* Search < 200ms
+* Scan 10 documents per minute
+* APK < 30MB
+* Works offline 100%
+* No OOM crashes
+* Minimal battery usage
+
+---
+
+## WHAT I AM TRYING TO ACHIEVE
+
+I want to build:
+
+A privacy-first, AI-powered, encrypted document vault that automatically organizes a messy phone into structured categories without requiring internet, accounts, or trust in a cloud provider.
+
+It should feel:
+
+* Instant
+* Intelligent
+* Secure
+* Professional
+* Simple
+
+---
+
+
+
+
+## DOCVAULT — COMPLETE MVP MASTER CHECKLIST (WEEK 1–8)
+
+-----------------------------------------------------------------------------------------------------------------------------
+WEEK 1 — Project Setup + Security Foundation
+GOAL: Empty app that opens, locks with fingerprint, and has encrypted database ready
+
+
+Day 1-2: Project Setup
+Create GitHub repo "DocVault"
+Create new Android project in Android Studio
+Set up Kotlin + Jetpack Compose
+Add .gitignore for Android
+Create package structure:
+com.yourdomain.docvault
+ui/ (screens)
+data/ (database, models)
+scanner/ (file scanning logic)
+ai/ (OCR + classification)
+security/ (encryption, biometric)
+pdf/ (PDF conversion)
+util/ (helpers)
+First commit + push
+
+Day 3-4: Security Layer
+Add dependencies:
+androidx.biometric
+androidx.security:security-crypto
+net.zetetic:android-database-sqlcipher
+Build PIN setup screen (first launch)
+Build biometric prompt (fingerprint / face)
+Build lock screen that appears on app open
+Auto-lock when app goes to background > 30 seconds
+Store PIN encrypted in Android Keystore
+
+Day 5-6: Encrypted Database
+Set up Room database with SQLCipher
+Create Document entity:
+@Entity
+data class Document(
+    @PrimaryKey val id: String, // UUID
+    val originalPath: String,
+    val pdfPath: String,
+    val category: String, // AI assigned
+    val title: String, // AI generated
+    val extractedText: String, // for search
+    val metadata: String, // JSON blob
+    val thumbnailPath: String,
+    val fileSize: Long,
+    val originalHash: String, // for dedup
+    val importDate: Long,
+    val documentDate: Long?, // date on doc
+    val isUserCorrected: Boolean,
+    val userCategory: String? // if corrected
+)
+Create DocumentDao (insert, query, search, delete)
+Verify database is encrypted (check with DB browser)
+
+Day 7: Basic Navigation Shell
+Bottom nav bar with 3 tabs: 📄 Documents | 🔍 Search | ⚙️ Settings
+Empty screens for each tab
+App icon and splash screen
+END OF WEEK 1 TEST:
+Open app → fingerprint prompt → empty home screen
+Kill app → reopen → fingerprint again
+Database exists and is encrypted
+-----------------------------------------------------------------------------------------------------------------------------
+
+WEEK 2 — File Scanning + Storage Access
+GOAL: App scans phone storage, finds all document-like files, and shows them in a list
+
+Day 1-2: Permission Handling
+Request READ_MEDIA_IMAGES (Android 13+)
+Request READ_EXTERNAL_STORAGE (Android 12 and below)
+Build friendly permission explanation screen:
+"DocVault needs to see your files to find documents. Nothing ever leaves your phone."
+Handle permission denied gracefully
+Handle "Don't ask again" case
+
+Day 3-4: MediaStore Scanner
+Build FileScanner class that queries MediaStore for:
+All images (JPEG, PNG, HEIC, WebP)
+All PDFs
+All documents (DOC, DOCX, XLS, XLSX)
+For each file found, collect:
+File path
+File size
+Date modified
+MIME type
+MD5 hash (for duplicate detection)
+Filter OUT non-document images:
+Skip files < 50 KB (probably memes/stickers)
+Skip files from known app folders (TikTok, Instagram cache, etc.)
+Keep files from: Downloads, WhatsApp, Camera, Documents, DCIM
+
+Day 5-6: Scan Results UI
+Build scanning progress screen:
+"Scanning your files..."
+"Found 142 files... checking for documents..."
+Progress bar with count
+Build results list showing:
+Thumbnail
+Filename
+File size
+Source folder (Downloads, WhatsApp, etc.)
+Show results AS they are found (not after completion)
+
+Day 7: Duplicate Detection
+Compare MD5 hashes of all found files
+Group duplicates together
+Show badge: "3 duplicates found"
+Let user pick which copy to keep
+END OF WEEK 2 TEST:
+Hit "Scan" → app finds files from storage
+Shows list of found documents with thumbnails
+Duplicates are flagged
+Nothing is imported yet, just discovered
+-----------------------------------------------------------------------------------------------------------------------------
+
+
+WEEK 3 — PDF Conversion + Encrypted Import
+GOAL: Found files are converted to PDF and stored in encrypted app storage
+
+Day 1-2: Image → PDF Conversion
+Build PdfConverter class
+For image files (JPG, PNG, HEIC):
+Load bitmap
+Auto-rotate based on EXIF data
+Create PDF using Android PdfDocument API
+Save to app's private encrypted storage
+For existing PDFs:
+Copy to encrypted storage (no conversion needed)
+For Office docs (DOC, XLSX):
+Store as-is for v1 (conversion is complex)
+Mark as "non-PDF" in database
+Generate thumbnail for each document
+
+Day 3-4: Encrypted File Storage
+Create EncryptedFileManager class
+Every PDF saved is encrypted with AES-256:
+Generate per-file encryption key
+Store key in Android Keystore
+Encrypted file: .vault extension
+File structure in app private storage:
+/data/data/com.docvault/vault/
+documents/
+abc123.vault (encrypted PDF)
+def456.vault
+thumbnails/
+abc123_thumb.vault
+def456_thumb.vault
+Decryption only when user opens a document
+
+Day 5-6: Import Flow
+From scan results, user taps "Import All" or selects files
+Batch processing with progress:
+"Importing 47 documents..."
+"Converting image 12 of 47..."
+For each file:
+Convert to PDF (if image)
+Encrypt the PDF
+Generate encrypted thumbnail
+Calculate hash
+Save record to encrypted database
+Skip if hash already exists (duplicate)
+After import, ask:
+"Delete 47 original files to free 234 MB?"
+[Yes, delete originals] [No, keep them]
+
+Day 7: Document Viewer
+Tap any document in list → opens in-app PDF viewer
+Decrypt file temporarily to display
+Pinch to zoom
+Clean up temp decrypted file when viewer closes
+END OF WEEK 3 TEST:
+Scan → select files → import → see them in vault
+Tap document → view PDF inside app
+Files are encrypted on disk
+Originals can be deleted
+-----------------------------------------------------------------------------------------------------------------------------
+
+
+WEEK 4 — AI: OCR + Text Extraction
+GOAL: App reads text from every document using OCR
+
+Day 1-2: Google ML Kit Setup
+Add ML Kit Text Recognition dependency: com.google.mlkit:text-recognition
+Build OcrEngine class
+For image-based documents:
+Feed bitmap to ML Kit
+Get back structured text blocks
+Store full extracted text in database
+For existing PDFs:
+Extract text using PdfRenderer
+If PDF has no text (scanned PDF) → render page to bitmap → run OCR on bitmap
+
+Day 3-4: Metadata Extraction
+Build MetadataExtractor class
+From extracted text, use regex patterns to find:
+Dates (multiple formats: DD/MM/YYYY, Jan 15 2025, etc.)
+Money amounts ($123.45, ₹1,234, etc.)
+Names (look for "Name:", "Patient:", "To:" patterns)
+Document numbers (Invoice #, Policy #, etc.)
+Store as JSON metadata blob in database
+
+Day 5-6: Auto-Generated Titles
+Build TitleGenerator class
+Logic (rule-based, not ML needed):
+Find most prominent entity in text
+Combine with document type hint + date
+Examples:
+"IMG_20250615.jpg" → "Amazon_Receipt_Jun2025.pdf"
+"download.pdf" → "Electricity_Bill_May2025.pdf"
+"photo_384.jpg" → "Passport_JohnDoe.pdf"
+User can always rename manually
+
+Day 7: Integrate OCR into Import Pipeline
+Updated import flow:
+Convert to PDF
+Run OCR
+Extract metadata
+Generate title
+Encrypt and store
+Show extracted text on document detail screen
+END OF WEEK 4 TEST:
+Import a receipt photo → app reads the text
+Shows extracted amount, date, vendor
+Auto-generated filename makes sense
+Import a passport photo → reads name, number
+-----------------------------------------------------------------------------------------------------------------------------
+
+
+WEEK 5 — AI: Auto-Categorization
+GOAL: AI automatically sorts documents into categories
+
+Day 1-2: Define Categories + Training Approach
+Categories for v1:
+📋 ID & Personal (passport, license, Aadhaar, etc.)
+💰 Financial (bank statements, tax docs)
+🧾 Receipts (shopping, restaurant, online orders)
+🏥 Medical (prescriptions, lab reports, bills)
+🎓 Education (certificates, marksheets, transcripts)
+🚗 Vehicle (RC, insurance, PUC, service records)
+🏠 Property (rent agreement, electricity, water)
+📄 Other (everything else)
+TWO classification approaches (use both):
+Approach A — Keyword matching (fast, simple, ~70% accurate):
+"passport" / "republic of india" → ID
+"prescription" / "diagnosis" → Medical
+"invoice" / "total" / "subtotal" → Receipt
+"semester" / "university" / "grade" → Education
+Approach B — TensorFlow Lite model (slower, ~90% accurate):
+Train a simple text classifier
+Input: extracted OCR text
+Output: category with confidence score
+Use Approach A as fallback when B is unsure
+
+Day 3-4: Build Keyword Classifier
+Create KeywordClassifier class
+Define keyword lists for each category
+Scoring system:
+Each keyword match = +1 point for that category
+Weighted keywords (e.g., "passport" = +5, "date" = +1)
+Highest scoring category wins
+If top two are close → mark as "unsure"
+Test with 20-30 real documents from your phone
+
+Day 5-6: Build ML Classifier (Optional for v1)
+Option A (Recommended for v1): Skip this, keyword is enough
+Option B (If you want ML):
+Use a pre-trained text classification model
+Fine-tune with ~100 labeled document texts
+Export as TFLite model
+Run on-device
+Use keyword classifier as fallback
+
+Day 7: Category UI + User Correction
+Home screen shows categories as cards/folders:
+[📋 ID (12)] [💰 Finance (8)] [🧾 Receipts (23)]
+[🏥 Medical (5)] [🎓 Education (7)] ...
+Each document shows AI-assigned category with badge
+Long press any document → "Change category" → Show all categories → user picks correct one
+Save correction in database:
+isUserCorrected = true
+userCategory = "Medical" (what user picked)
+category = "Receipt" (what AI thought)
+This data will improve AI later
+END OF WEEK 5 TEST:
+Import 20 documents → AI categorizes them
+Home screen shows organized folders
+Tap folder → see documents inside
+Wrong category? → long press → fix it
+At least 70% should be categorized correctly
+-----------------------------------------------------------------------------------------------------------------------------
+
+
+WEEK 6 — Search + Camera Capture + Share Intent
+GOAL: Find any document instantly, capture new ones easily
+
+Day 1-2: Full-Text Search
+Build search screen
+Search across:
+Document title
+Extracted OCR text
+Category name
+Metadata (vendor name, amounts)
+Room FTS (Full Text Search) setup:
+@Fts4
+@Entity(tableName = "document_fts")
+data class DocumentFts(
+    val title: String,
+    val extractedText: String,
+    val category: String
+)
+Search results show:
+Document thumbnail
+Title
+Text snippet with search term highlighted
+Category badge
+Search should feel instant (<200ms)
+
+Day 3-4: Camera Capture
+Add floating "+" button on home screen
+Tap → options:
+📷 Scan document (camera)
+📁 Pick from files
+Camera capture flow:
+Open camera
+User takes photo of paper document
+Show preview: "Use this photo?"
+Optional: crop / rotate
+Process: convert → OCR → categorize → save
+Show result: "Saved as Medical document"
+File picker flow:
+Open system file picker
+User selects any file
+Import and process same as above
+
+Day 5-6: Share TO App (Incoming Intent)
+Register intent filters in AndroidManifest.xml:
+<action android:name="android.intent.action.SEND" />
+<category android:name="android.intent.category.DEFAULT"/>
+<data android:mimeType="image/*" />
+<data android:mimeType="application/pdf" />
+When user shares any file TO DocVault:
+Receive the file
+Show quick preview
+Process: convert → OCR → categorize → save
+Confirm: "Saved to Medical"
+WhatsApp example: User receives PDF → Share → DocVault → done
+
+Day 7: Share FROM App (Outgoing)
+On document detail screen, add share button
+Flow:
+Decrypt the PDF temporarily
+Open Android share sheet
+User picks WhatsApp / Email / Drive / etc.
+File shared
+Delete temp decrypted file
+Add "Download" button:
+Saves decrypted PDF to Downloads folder
+Shows confirmation: "Saved to Downloads"
+END OF WEEK 6 TEST:
+Search "passport" → finds your passport
+Camera button → snap paper → auto-saved and categorized
+WhatsApp → Share PDF → DocVault → imported
+DocVault → Share document → WhatsApp → sent
+-----------------------------------------------------------------------------------------------------------------------------
+
+
+WEEK 7 — Onboarding + Backup + Polish
+GOAL: First-time experience is smooth, data is safe
+
+Day 1-2: First Launch Onboarding
+Welcome screen (3 slides):
+Slide 1: "Your documents, organized by AI"
+Slide 2: "Everything stays on your phone, encrypted"
+Slide 3: "Let's set up security"
+PIN setup → biometric enrollment
+Permission request with clear explanation
+First scan choice:
+[⚡ Quick scan — last 30 days]
+[📦 Full scan — everything]
+Scanning screen with progress:
+"Scanning... found 23 documents so far"
+Show documents appearing in real-time below progress
+Completion screen:
+"Found 47 documents in 8 categories!"
+[Start exploring →]
+
+Day 3-4: Vault Backup & Restore
+Settings → "Backup Vault"
+Creates one encrypted ZIP file containing:
+All encrypted PDFs
+Encrypted database export
+Metadata JSON
+Backup protected with user's PIN
+User saves ZIP wherever they want:
+Google Drive
+USB drive
+Send to own email
+Settings → "Restore Vault"
+Pick backup ZIP file
+Enter PIN
+All documents restored
+Auto-backup reminder every 30 days:
+"You haven't backed up in 30 days. Backup now?"
+
+Day 5-6: UI Polish
+Home screen layout:
+Top bar: 🔒 DocVault 🔔 ⚙️
+Search bar: [🔍 Search documents...]
+Category cards:
+📋 ID & Personal 12
+💰 Financial 8
+🧾 Receipts 23
+🏥 Medical 5
+🎓 Education 7
+🚗 Vehicle 4
+🏠 Property 6
+📄 Other 3
+Recently Added documents grid
+Color theme: Dark mode + Light mode
+Smooth animations on category open/close
+Pull-to-refresh on document list
+Empty states: friendly messages when no docs in category
+
+Day 7: Settings Screen
+Settings options:
+Change PIN
+Enable/disable biometric
+Auto-lock timeout (30s, 1min, 5min)
+Backup vault
+Restore vault
+Scan now (re-scan storage)
+Storage used by vault
+Clear all data (with confirmation)
+About / Version
+END OF WEEK 7 TEST:
+Fresh install → beautiful onboarding → scan → organized
+Backup → delete app → reinstall → restore → all docs back
+Settings all work
+App looks professional
+-----------------------------------------------------------------------------------------------------------------------------
+
+
+WEEK 8 — Testing + Bug Fixes + Play Store Prep
+GOAL: Production-ready app on Google Play Store
+
+Day 1-2: Testing
+Test on at least 3 different phones / API levels
+Test with these document types:
+Passport photo
+Electricity bill (photo + PDF)
+Medical prescription photo
+Bank statement PDF
+Shopping receipt photo
+Education certificate
+Driving license photo
+Random meme (should NOT be imported)
+Test edge cases:
+Very blurry photo (OCR should still try)
+50 MB PDF (should handle without crash)
+Phone with 10,000 photos (scan shouldn't freeze)
+No internet (everything must work offline)
+Low storage (show warning)
+Fix all crashes and bugs found
+
+Day 3-4: Performance Optimization
+Scan speed: should process ~10 documents per minute
+App launch: should open in < 2 seconds
+Search: results in < 200ms
+Memory: no OOM crashes with large images
+Battery: scan of 100 docs should use < 5% battery
+App size: keep APK under 30 MB
+
+Day 5-6: Play Store Preparation
+Create Google Play Developer account ($25 one-time)
+Prepare store listing:
+App name: "DocVault — AI Document Organizer"
+Short description (80 chars)
+Full description (4000 chars)
+5-8 screenshots (phone + tablet)
+Feature graphic (1024 x 500)
+App icon (512 x 512)
+Privacy policy page (required):
+Host on GitHub Pages (free)
+State: "All data stays on device"
+State: "No data collected or transmitted"
+Content rating questionnaire
+Set up pricing:
+Free with in-app purchase
+Free: 10 documents max
+Pro: $4.99 one-time → unlimited documents
+Implement billing:
+Google Play Billing Library
+One-time purchase (non-consumable)
+Restore purchase button in settings
+
+Day 7: Launch
+Build signed release APK / AAB
+Upload to Play Store
+Submit for review (takes 1-7 days)
+Set up basic crash reporting (Firebase Crashlytics, free)
+Share with 5-10 friends for initial feedback
+END OF WEEK 8:
+App is LIVE on Google Play Store
+Friends are using it and giving feedback
+-----------------------------------------------------------------------------------------------------------------------------

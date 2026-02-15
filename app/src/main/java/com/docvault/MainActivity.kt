@@ -1,112 +1,114 @@
 // File: app/src/main/java/com/docvault/MainActivity.kt
-// STATUS: REPLACE the entire file
 
 package com.docvault
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.docvault.data.models.CategoryItem
-import com.docvault.data.models.DocumentCategory
-import com.docvault.ui.screens.HomeScreen
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.docvault.ui.navigation.AppNavGraph
+import com.docvault.ui.navigation.Routes
 import com.docvault.ui.screens.LockScreen
+import com.docvault.ui.screens.OnboardingScreen
+import com.docvault.ui.screens.PermissionScreen
 import com.docvault.ui.screens.PinSetupScreen
 import com.docvault.ui.theme.DocVaultTheme
 import com.docvault.ui.viewmodel.AppScreen
 import com.docvault.ui.viewmodel.AppViewModel
 import com.docvault.util.FileUtil
 
-/**
- * The one and only Activity in the entire app.
- *
- * WHY FragmentActivity?
- * Android's fingerprint popup (BiometricPrompt) requires it.
- * FragmentActivity is a type of Activity that supports this.
- * It works with Jetpack Compose just fine.
- */
 class MainActivity : FragmentActivity() {
 
-    // "by viewModels()" = Android creates the ViewModel for us
-    // and keeps it alive even when the screen rotates
     private val viewModel: AppViewModel by viewModels()
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.entries.all { it.value }
+        viewModel.onPermissionsResult(allGranted)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ── Watch for app going to background / foreground ──
-        // This is how auto-lock works:
-        // App goes to background → start timer
-        // App comes back → check if timer expired → lock if yes
+        // Handle incoming share intents when app starts
+        handleIntent(intent)
+
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
-                    // User left the app (pressed home, switched apps, etc.)
                     viewModel.onAppPaused()
-                    // Also clean up any temporary decrypted files
                     FileUtil.clearTempFiles(this)
                 }
                 Lifecycle.Event.ON_START -> {
-                    // User came back to the app
                     viewModel.onAppResumed()
+                    viewModel.checkPermissions(this)
                 }
-                else -> { /* ignore other lifecycle events */ }
+                else -> {}
             }
         })
 
-        // ── Set up the UI ───────────────────────────────────
         setContent {
             DocVaultTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Show different screen based on app state
-                    when (val screen = viewModel.currentScreen) {
-
-                        // ── FIRST TIME: Create a PIN ────────
-                        is AppScreen.PinSetup -> {
-                            PinSetupScreen(
-                                onPinCreated = { pin ->
-                                    viewModel.onPinCreated(pin)
-                                },
-                                onBiometricSetup = {
-                                    viewModel.onBiometricEnabled()
-                                }
+                    when (viewModel.currentScreen) {
+                        is AppScreen.Onboarding -> {
+                            OnboardingScreen(
+                                onFinished = { viewModel.onOnboardingFinished() }
                             )
                         }
 
-                        // ── LOCKED: Enter PIN or use fingerprint ──
+                        is AppScreen.PinSetup -> {
+                            PinSetupScreen(
+                                onPinCreated = { pin -> viewModel.onPinCreated(pin) },
+                                onBiometricSetup = { viewModel.onBiometricEnabled() }
+                            )
+                        }
+
                         is AppScreen.Lock -> {
                             LockScreen(
-                                onPinEntered = { pin ->
-                                    viewModel.onPinEntered(pin)
-                                },
-                                onBiometricClick = {
-                                    triggerBiometric()
-                                },
+                                onPinEntered = { pin -> viewModel.onPinEntered(pin) },
+                                onBiometricClick = { triggerBiometric() },
                                 showBiometric = viewModel.showBiometric,
                                 pinError = viewModel.pinError,
                                 isLoading = false
                             )
                         }
 
-                        // ── UNLOCKED: Show the main app ─────
-                        is AppScreen.Home -> {
-                            HomeScreen(
-                                categories = getPlaceholderCategories(),
-                                recentDocuments = emptyList(),
-                                onCategoryClick = { /* TODO: Week 2 */ },
-                                onSearchClick = { /* TODO: Week 6 */ },
-                                onAddClick = { /* TODO: Week 6 */ },
-                                onDocumentClick = { /* TODO: Week 3 */ }
+                        is AppScreen.Permission -> {
+                            PermissionScreen(
+                                onGrantClick = { launchPermissionRequest() }
                             )
+                        }
+
+                        is AppScreen.Home -> {
+                            MainAppScaffold(viewModel)
                         }
                     }
                 }
@@ -114,37 +116,84 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /**
-     * Show the fingerprint popup.
-     */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        // Handle share intents if the app is already open in background
+        intent?.let { handleIntent(it) }
+    }
+
+    private fun handleIntent(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND) {
+            val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            uri?.let {
+                // TODO: In Week 6 Day 5, we will trigger a "Quick Import" screen here
+                // For now, we log it and ensure the logic is ready
+            }
+        }
+    }
+
+    private fun launchPermissionRequest() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        requestPermissionLauncher.launch(permissions)
+    }
+
+    @Composable
+    fun MainAppScaffold(viewModel: AppViewModel) {
+        val navController = rememberNavController()
+        
+        val items = listOf(
+            BottomNavItem("Docs", Routes.HOME, Icons.Default.Description),
+            BottomNavItem("Search", Routes.SEARCH, Icons.Default.Search),
+            BottomNavItem("Settings", Routes.SETTINGS, Icons.Default.Settings)
+        )
+
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentDestination = navBackStackEntry?.destination
+                    
+                    items.forEach { item ->
+                        NavigationBarItem(
+                            icon = { Icon(item.icon, contentDescription = item.name) },
+                            label = { Text(item.name) },
+                            selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                            onClick = {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        ) { innerPadding ->
+            Box(modifier = Modifier.padding(innerPadding)) {
+                AppNavGraph(navController = navController, appViewModel = viewModel)
+            }
+        }
+    }
+
     private fun triggerBiometric() {
         val app = application as DocVaultApplication
         app.biometricHelper.authenticate(
             activity = this,
-            onSuccess = { _ ->
-                // result contains crypto object if we used one
-                viewModel.onBiometricSuccess()
-            },
-            onError = { error ->
-                viewModel.onBiometricError(error)
-            }
+            onSuccess = { viewModel.onBiometricSuccess() },
+            onError = { error -> viewModel.onBiometricError(error) }
         )
     }
-
-    /**
-     * Placeholder category data for the home screen.
-     * In Week 2+, this will come from the real database.
-     *
-     * For now, it just shows the 8 categories with zero documents.
-     * This lets us test that the home screen looks right.
-     */
-    private fun getPlaceholderCategories(): List<CategoryItem> {
-        return DocumentCategory.entries.map { category ->
-            CategoryItem(
-                emoji = category.emoji,
-                name = category.displayName,
-                count = 0
-            )
-        }
-    }
 }
+
+data class BottomNavItem(
+    val name: String,
+    val route: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
