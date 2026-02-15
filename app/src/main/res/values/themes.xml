@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.DocVault" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Status bar (the bar at top with clock and battery) -->
+        <item name="android:statusBarColor">#1A237E</item>
+        <!-- Navigation bar (the bar at bottom with back button) -->
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <!-- Background while app is loading -->
+        <item name="android:windowBackground">#FAFAFA</item>
+    </style>
+</resources>

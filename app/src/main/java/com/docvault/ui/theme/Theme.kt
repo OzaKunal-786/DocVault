@@ -1,2 +1,56 @@
 ﻿package com.docvault.ui.theme
-// TODO: Define Material 3 theme
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+
+private val LightColors = lightColorScheme(
+primary = Primary,
+onPrimary = OnPrimary,
+secondary = Secondary,
+onSecondary = OnSecondary,
+background = LightBackground,
+surface = LightSurface,
+error = Error,
+onBackground = Color.Black,
+onSurface = Color.Black
+)
+
+private val DarkColors = darkColorScheme(
+primary = Primary,
+onPrimary = OnPrimary,
+secondary = Secondary,
+onSecondary = OnSecondary,
+background = DarkBackground,
+surface = DarkSurface,
+error = Error,
+onBackground = Color.White,
+onSurface = Color.White
+)
+
+@Composable
+fun DocVaultTheme(
+darkTheme: Boolean = isSystemInDarkTheme(),
+dynamicColor: Boolean = true,
+content: @Composable () -> Unit
+) {
+val context = LocalContext.current
+val colorScheme = when {
+    dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    }
+    else -> if (darkTheme) DarkColors else LightColors
+}
+
+MaterialTheme(
+    colorScheme = colorScheme,
+    typography = Typography,
+    content = content
+)
+}
