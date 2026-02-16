@@ -26,8 +26,8 @@ sealed class ImportStatus {
 }
 
 /**
- * Optimized ImportManager that processes multiple files in parallel
- * to improve import speed while managing system resources.
+ * Robust ImportManager designed for high volume imports.
+ * Handles queuing, resource management, and detailed progress reporting.
  */
 class ImportManager(
     private val context: Context,
@@ -42,102 +42,105 @@ class ImportManager(
     private val _importStatus = MutableStateFlow<ImportStatus>(ImportStatus.Idle)
     val importStatus = _importStatus.asStateFlow()
 
-    // Limit concurrency to avoid OOM or CPU starvation
-    // 3 parallel tasks is a sweet spot for most mobile CPUs
-    private val semaphore = Semaphore(3)
+    // Limit concurrency strictly to 2 for heavy AI/PDF work to prevent OOM
+    private val semaphore = Semaphore(2)
 
     suspend fun importFiles(files: List<FileScanner.ScannedFile>) = withContext(Dispatchers.IO) {
-        _importStatus.value = ImportStatus.Progress(0, files.size, "Starting...")
+        if (files.isEmpty()) return@withContext
+        
+        _importStatus.value = ImportStatus.Progress(0, files.size, "Analyzing storage...")
         
         val totalFiles = files.size
         val importedCount = AtomicInteger(0)
         val processedCount = AtomicInteger(0)
 
-        coroutineScope {
-            files.map { scannedFile ->
-                async {
-                    semaphore.withPermit {
-                        try {
-                            if (!repository.isDuplicate(scannedFile.hash)) {
-                                val documentId = UUID.randomUUID().toString()
-                                
-                                // 1. Prepare PDF
-                                val pdfFile = preparePdf(scannedFile, documentId)
-
-                                if (pdfFile != null && pdfFile.exists()) {
-                                    // 2. AI Processing
-                                    val ocrText = if (scannedFile.mimeType.startsWith("image")) {
-                                        ocrEngine.extractText(scannedFile.uri)
-                                    } else { "" }
+        // Process in smaller chunks to keep memory usage predictable
+        files.chunked(50).forEach { chunk ->
+            coroutineScope {
+                chunk.map { scannedFile ->
+                    async {
+                        semaphore.withPermit {
+                            try {
+                                // Skip if we already have this exact file
+                                if (!repository.isDuplicate(scannedFile.hash)) {
+                                    val documentId = UUID.randomUUID().toString()
                                     
-                                    val metadata = metadataExtractor.extract(ocrText)
-                                    val smartTitle = titleGenerator.generateTitle(ocrText, metadata, scannedFile.name)
-                                    val category = categoryClassifier.classify(ocrText)
+                                    // 1. Prepare PDF (Image to PDF or Copy existing PDF)
+                                    val pdfFile = preparePdf(scannedFile, documentId)
 
-                                    // 3. Encrypt and store
-                                    val vaultFile = encryptedFileManager.encryptAndStore(pdfFile, documentId)
-                                    
-                                    if (vaultFile != null) {
-                                        // 4. Save to Database
-                                        val entity = DocumentEntity(
-                                            id = documentId,
-                                            originalPath = scannedFile.path,
-                                            originalFileName = scannedFile.name,
-                                            originalHash = scannedFile.hash,
-                                            vaultFileName = vaultFile.name,
-                                            thumbnailFileName = null,
-                                            title = smartTitle,
-                                            category = category.displayName,
-                                            extractedText = ocrText,
-                                            metadata = "{}", // In a real app, use Gson/Moshi here
-                                            aiConfidence = 0.8f,
-                                            fileSize = scannedFile.size,
-                                            mimeType = scannedFile.mimeType,
-                                            sourceFolder = getFolderName(scannedFile.path),
-                                            isProcessed = ocrText.isNotEmpty()
-                                        )
-                                        repository.insertDocument(entity)
-                                        importedCount.incrementAndGet()
+                                    if (pdfFile != null && pdfFile.exists()) {
+                                        // 2. AI Analysis
+                                        val ocrText = if (scannedFile.mimeType.startsWith("image")) {
+                                            ocrEngine.extractText(scannedFile.uri)
+                                        } else { "" } // PDF OCR planned for later
+                                        
+                                        val metadata = metadataExtractor.extract(ocrText)
+                                        val smartTitle = titleGenerator.generateTitle(ocrText, metadata, scannedFile.name)
+                                        val category = categoryClassifier.classify(ocrText)
+
+                                        // 3. Encrypt and Store
+                                        val vaultFile = encryptedFileManager.encryptAndStore(pdfFile, documentId)
+                                        
+                                        if (vaultFile != null) {
+                                            // 4. Record in Database
+                                            val entity = DocumentEntity(
+                                                id = documentId,
+                                                originalPath = scannedFile.path,
+                                                originalFileName = scannedFile.name,
+                                                originalHash = scannedFile.hash,
+                                                vaultFileName = vaultFile.name,
+                                                thumbnailFileName = null,
+                                                title = smartTitle,
+                                                category = category.displayName,
+                                                extractedText = ocrText,
+                                                metadata = "{}", 
+                                                aiConfidence = 0.8f,
+                                                fileSize = pdfFile.length(),
+                                                mimeType = "application/pdf", // All vault docs are PDF
+                                                sourceFolder = scannedFile.path.substringBeforeLast("/", "Unknown"),
+                                                isProcessed = true
+                                            )
+                                            repository.insertDocument(entity)
+                                            importedCount.incrementAndGet()
+                                        }
+                                        
+                                        // Cleanup TEMP file, NEVER the original
+                                        pdfFile.delete()
                                     }
-                                    pdfFile.delete()
                                 }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            } finally {
+                                val currentProcessed = processedCount.incrementAndGet()
+                                _importStatus.value = ImportStatus.Progress(currentProcessed, totalFiles, scannedFile.name)
                             }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        } finally {
-                            val currentProcessed = processedCount.incrementAndGet()
-                            _importStatus.value = ImportStatus.Progress(currentProcessed, totalFiles, scannedFile.name)
                         }
                     }
-                }
-            }.awaitAll()
+                }.awaitAll()
+            }
+            // Small break between chunks to allow GC to collect
+            yield()
         }
         
         _importStatus.value = ImportStatus.Success(importedCount.get())
+        delay(3000) // Keep success message for 3s
+        _importStatus.value = ImportStatus.Idle
     }
 
     private suspend fun preparePdf(scannedFile: FileScanner.ScannedFile, documentId: String): File? {
         return try {
-            val temp = File(context.cacheDir, "temp_$documentId.pdf")
+            val temp = File(context.cacheDir, "imp_$documentId.pdf")
             if (scannedFile.mimeType == "application/pdf") {
                 context.contentResolver.openInputStream(scannedFile.uri)?.use { input ->
                     temp.outputStream().use { output -> input.copyTo(output) }
                 }
                 temp
             } else {
+                // Convert image to PDF
                 if (pdfConverter.convertImageToPdf(scannedFile.uri, temp)) temp else null
             }
         } catch (e: Exception) {
             null
-        }
-    }
-
-    private fun getFolderName(path: String): String {
-        return try {
-            val file = File(path)
-            file.parentFile?.name ?: "Unknown"
-        } catch (e: Exception) {
-            "Unknown"
         }
     }
 }

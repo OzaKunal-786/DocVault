@@ -44,14 +44,14 @@ val pulse = rememberInfiniteTransition(label = "pulse")
 
 fun addDigit(d: Char) {
     if (pinCreated) return
-    if (step == 1 && pin1.length < 4) {
+    if (step == 1 && pin1.length < 6) {
         pin1 += d
-        if (pin1.length == 4) {
+        if (pin1.length == 6) {
             step = 2
         }
-    } else if (step == 2 && pin2.length < 4) {
+    } else if (step == 2 && pin2.length < 6) {
         pin2 += d
-        if (pin2.length == 4) {
+        if (pin2.length == 6) {
             if (pin2 == pin1) {
                 onPinCreated(pin2)
                 pinCreated = true
@@ -111,7 +111,7 @@ Surface(
             Spacer(Modifier.height(8.dp))
             Text(
                 text = if (!pinCreated) {
-                    if (step == 1) "Create a PIN" else "Confirm your PIN"
+                    if (step == 1) "Create a 6-digit PIN" else "Confirm your PIN"
                 } else "Enable fingerprint unlock?",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
@@ -212,7 +212,7 @@ Surface(
 @Composable
 private fun PinDots(length: Int) {
 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-repeat(4) { index ->
+repeat(6) { index ->
 val filled = index < length
 Surface(
 shape = CircleShape,

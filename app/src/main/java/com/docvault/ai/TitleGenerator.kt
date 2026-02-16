@@ -18,12 +18,27 @@ class TitleGenerator {
         metadata: MetadataExtractor.ExtractedMetadata,
         originalName: String
     ): String {
+        val lowerText = ocrText.lowercase()
         val vendor = findVendor(ocrText)
         val date = metadata.dates.firstOrNull()?.replace("/", "-") ?: ""
-        val type = inferType(ocrText)
+        
+        // Priority based type inference
+        val type = when {
+            lowerText.contains("prescription") -> "Prescription"
+            lowerText.contains("lab report") || lowerText.contains("blood test") -> "Medical_Report"
+            lowerText.contains("passport") -> "Passport"
+            lowerText.contains("license") -> "License"
+            lowerText.contains("aadhaar") -> "Aadhaar"
+            lowerText.contains("invoice") || lowerText.contains("bill") -> "Invoice"
+            lowerText.contains("receipt") -> "Receipt"
+            lowerText.contains("statement") -> "Statement"
+            lowerText.contains("policy") -> "Policy"
+            lowerText.contains("certificate") -> "Certificate"
+            else -> ""
+        }
 
         val parts = mutableListOf<String>()
-        if (vendor.isNotEmpty()) parts.add(vendor)
+        if (vendor.isNotEmpty() && !type.contains(vendor, ignoreCase = true)) parts.add(vendor)
         if (type.isNotEmpty()) parts.add(type)
         if (date.isNotEmpty()) parts.add(date)
 
@@ -36,12 +51,10 @@ class TitleGenerator {
     }
 
     private fun findVendor(text: String): String {
-        val lines = text.lines().take(10) // Vendors are usually at the top
-        
-        // Common vendors list (could be expanded)
+        val lines = text.lines().take(10)
         val commonVendors = listOf(
             "Amazon", "Walmart", "Apple", "Google", "Uber", "Netflix", 
-            "Starbucks", "McDonald's", "Zomato", "Swiggy", "Airtel", "Jio"
+            "Starbucks", "McDonald's", "Zomato", "Swiggy", "Airtel", "Jio", "HDFC", "ICICI"
         )
 
         for (line in lines) {
@@ -50,22 +63,7 @@ class TitleGenerator {
             }
         }
         
-        // If no common vendor, take the first non-empty line as a guess (often company name)
-        return lines.firstOrNull { it.trim().length > 3 }?.trim()?.split(" ")?.firstOrNull() ?: ""
-    }
-
-    private fun inferType(text: String): String {
-        val lowerText = text.lowercase()
-        return when {
-            lowerText.contains("invoice") || lowerText.contains("bill") -> "Bill"
-            lowerText.contains("receipt") -> "Receipt"
-            lowerText.contains("statement") -> "Statement"
-            lowerText.contains("passport") -> "Passport"
-            lowerText.contains("license") -> "License"
-            lowerText.contains("policy") -> "Policy"
-            lowerText.contains("prescription") -> "Prescription"
-            lowerText.contains("certificate") -> "Certificate"
-            else -> ""
-        }
+        // If no common vendor, take the first line that looks like a name (uppercase, few words)
+        return lines.firstOrNull { it.trim().length in 3..20 && it == it.uppercase() }?.trim()?.split(" ")?.firstOrNull() ?: ""
     }
 }

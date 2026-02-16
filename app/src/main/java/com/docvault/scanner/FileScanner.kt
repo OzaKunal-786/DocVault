@@ -5,17 +5,13 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import android.util.Log
-import com.docvault.data.database.DocumentEntity
+import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.security.MessageDigest
-import java.util.UUID
 
 /**
- * Scans the device storage for document-like files (Images, PDFs).
- * Filters out small files (memes/stickers) and non-document folders.
+ * Optimized Scanner with strict filters to avoid "junk" files.
  */
 class FileScanner(private val context: Context) {
 
@@ -29,31 +25,61 @@ class FileScanner(private val context: Context) {
         val hash: String
     )
 
-    /**
-     * Main scanning function. Queries MediaStore for images and PDFs.
-     */
     suspend fun scanForDocuments(): List<ScannedFile> = withContext(Dispatchers.IO) {
         val foundFiles = mutableListOf<ScannedFile>()
         
-        // 1. Scan Images
+        // Use MediaStore for speed
         foundFiles.addAll(queryMediaStore(MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
         
-        // 2. Scan Documents (PDFs)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            foundFiles.addAll(queryMediaStore(MediaStore.Files.getContentUri("external")))
+        val docUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Files.getContentUri("external")
         } else {
-            // Older versions use a slightly different approach for PDFs
-            foundFiles.addAll(queryMediaStore(MediaStore.Files.getContentUri("external")))
+            MediaStore.Files.getContentUri("external")
         }
+        foundFiles.addAll(queryMediaStore(docUri))
 
-        // 3. Filter and Deduplicate
+        // Deduplicate and strictly filter
+        foundFiles.distinctBy { it.hash }.filter { isValidDocument(it) }
+    }
+
+    suspend fun scanFolderRecursively(rootUri: Uri): List<ScannedFile> = withContext(Dispatchers.IO) {
+        val foundFiles = mutableListOf<ScannedFile>()
+        val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
+        if (rootDoc != null && rootDoc.isDirectory) {
+            traverseFolder(rootDoc, foundFiles)
+        }
         foundFiles.distinctBy { it.hash }
-            .filter { isValidDocument(it) }
+    }
+
+    private fun traverseFolder(folder: DocumentFile, results: MutableList<ScannedFile>) {
+        folder.listFiles().forEach { file ->
+            if (file.isDirectory) {
+                // Skip hidden or app-specific directories
+                if (!file.name?.startsWith(".")!!) traverseFolder(file, results)
+            } else if (isSupportedMimeType(file.type)) {
+                val scanned = ScannedFile(
+                    uri = file.uri,
+                    name = file.name ?: "Unknown",
+                    path = folder.name ?: "",
+                    size = file.length(),
+                    mimeType = file.type ?: "",
+                    dateModified = file.lastModified(),
+                    hash = generateHash(file.uri.toString(), file.length(), file.lastModified())
+                )
+                if (isValidDocument(scanned)) {
+                    results.add(scanned)
+                }
+            }
+        }
+    }
+
+    private fun isSupportedMimeType(mimeType: String?): Boolean {
+        return mimeType == "image/jpeg" || mimeType == "image/png" || 
+               mimeType == "application/pdf" || mimeType == "image/webp"
     }
 
     private fun queryMediaStore(collection: Uri): List<ScannedFile> {
         val files = mutableListOf<ScannedFile>()
-        
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -63,87 +89,62 @@ class FileScanner(private val context: Context) {
             MediaStore.Files.FileColumns.DATE_MODIFIED
         )
 
-        // Filter for images and PDFs only
-        val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR " +
-                        "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR " +
-                        "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR " +
-                        "${MediaStore.Files.FileColumns.MIME_TYPE} = ?"
-        
-        val selectionArgs = arrayOf(
-            "image/jpeg",
-            "image/png",
-            "application/pdf",
-            "image/webp"
-        )
+        val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} IN (?, ?, ?, ?)"
+        val args = arrayOf("image/jpeg", "image/png", "application/pdf", "image/webp")
 
-        context.contentResolver.query(
-            collection,
-            projection,
-            selection,
-            selectionArgs,
-            "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
-        )?.use { cursor ->
-            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
-            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
-            val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
-            val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+        context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+            val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+            val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
 
             while (cursor.moveToNext()) {
-                val id = cursor.getLong(idColumn)
-                val name = cursor.getString(nameColumn) ?: "Unknown"
-                val path = cursor.getString(dataColumn) ?: ""
-                val size = cursor.getLong(sizeColumn)
-                val mimeType = cursor.getString(mimeColumn) ?: ""
-                val dateModified = cursor.getLong(dateColumn)
-                val contentUri = ContentUris.withAppendedId(collection, id)
-
-                // Generate a quick hash for the file (using path + size + date as a proxy for MD5 if file is large)
-                // In a real production app, we'd do a partial MD5 for speed.
-                val hash = generateHash(path, size, dateModified)
-
-                files.add(ScannedFile(contentUri, name, path, size, mimeType, dateModified, hash))
+                val contentUri = ContentUris.withAppendedId(collection, cursor.getLong(idCol))
+                val path = cursor.getString(dataCol) ?: ""
+                val size = cursor.getLong(sizeCol)
+                val date = cursor.getLong(dateCol)
+                
+                files.add(ScannedFile(
+                    uri = contentUri,
+                    name = cursor.getString(nameCol) ?: "Unknown",
+                    path = path,
+                    size = size,
+                    mimeType = cursor.getString(mimeCol) ?: "",
+                    dateModified = date,
+                    hash = generateHash(path, size, date)
+                ))
             }
         }
         return files
     }
 
     /**
-     * Filters out files that are likely not documents (too small, or in cache/app folders).
+     * Strict filtering to ignore junk like WhatsApp Stickers, small icons, etc.
      */
     private fun isValidDocument(file: ScannedFile): Boolean {
-        // Skip files smaller than 50KB (likely memes, icons, or stickers)
-        if (file.size < 50 * 1024) return false
+        // 1. Minimum size: ignore files < 80KB (stickers/icons)
+        if (file.size < 80 * 1024) return false
 
-        val pathLower = file.path.lowercase()
-        
-        // Only keep files from relevant folders
-        val relevantFolders = listOf(
-            "download",
-            "documents",
-            "whatsapp/media/whatsapp documents",
-            "whatsapp/media/whatsapp images",
-            "dcim/camera",
-            "pictures"
+        val path = file.path.lowercase()
+        val name = file.name.lowercase()
+
+        // 2. Ignore known junk folders/files
+        val junkTerms = listOf(
+            "sticker", "cache", "thumb", "temp", "icon", "emoji", 
+            "instagram", "sent", "private", "avatars", ".trashed"
         )
+        if (junkTerms.any { path.contains(it) || name.contains(it) }) return false
 
-        val isInRelevantFolder = relevantFolders.any { pathLower.contains(it) }
-        
-        // Filter out known "trash" folders
-        val isTrash = pathLower.contains("cache") || 
-                      pathLower.contains(".thumbnails") || 
-                      pathLower.contains("temp") ||
-                      pathLower.contains("instagram") ||
-                      pathLower.contains("sent") // Skip sent WhatsApp files to avoid duplicates
-
-        return isInRelevantFolder && !isTrash
+        // 3. Keep files from relevant locations
+        val relevantFolders = listOf("download", "documents", "whatsapp", "dcim", "pictures", "camera")
+        return relevantFolders.any { path.contains(it) }
     }
 
     private fun generateHash(path: String, size: Long, date: Long): String {
-        val raw = "$path|$size|$date"
         return MessageDigest.getInstance("MD5")
-            .digest(raw.toByteArray())
+            .digest("$path|$size|$date".toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
 }

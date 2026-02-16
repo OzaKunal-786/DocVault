@@ -3,50 +3,56 @@ package com.docvault.ai
 import com.docvault.data.models.DocumentCategory
 
 /**
- * Classifies document text into a category using keyword scoring.
+ * Classifies document text into a category using keyword scoring with priorities.
  */
 class CategoryClassifier {
 
-    // Weighted keywords for each category. Higher weight = stronger signal.
     private val categoryKeywords = mapOf(
         DocumentCategory.ID_PERSONAL to mapOf(
-            "passport" to 5, "license" to 5, "aadhaar" to 5, "social security" to 5, 
-            "birth certificate" to 5, "government" to 2, "identity" to 3
+            "passport" to 10, "license" to 10, "aadhaar" to 10, "social security" to 10, 
+            "birth certificate" to 10, "government" to 2, "identity" to 5, "voter id" to 10,
+            "pan card" to 10, "driving license" to 10
         ),
         DocumentCategory.FINANCIAL to mapOf(
-            "statement" to 3, "bank" to 2, "account" to 2, "tax" to 4, "income" to 3, 
-            "investment" to 3, "loan" to 3
+            "statement" to 5, "bank" to 3, "account" to 3, "tax" to 8, "income" to 5, 
+            "investment" to 5, "loan" to 5, "credit card" to 4, "debit card" to 4, "financial" to 5
         ),
         DocumentCategory.RECEIPTS to mapOf(
-            "receipt" to 4, "invoice" to 4, "bill" to 3, "total" to 1, "subtotal" to 1,
-            "cash" to 1, "credit card" to 1, "order summary" to 3
+            "receipt" to 8, "invoice" to 8, "bill" to 5, "total" to 2, "subtotal" to 2,
+            "cash" to 2, "order summary" to 5, "payment" to 3, "transaction" to 3
         ),
         DocumentCategory.MEDICAL to mapOf(
-            "medical" to 4, "hospital" to 3, "clinic" to 3, "prescription" to 5,
-            "doctor" to 2, "patient" to 2, "diagnosis" to 4, "lab report" to 5
+            "medical" to 8, "hospital" to 8, "clinic" to 8, "prescription" to 10,
+            "doctor" to 5, "patient" to 5, "diagnosis" to 8, "lab report" to 10,
+            "pharmacy" to 8, "blood test" to 10, "vaccination" to 10, "health" to 5
         ),
         DocumentCategory.EDUCATION to mapOf(
-            "university" to 4, "college" to 3, "school" to 2, "degree" to 5,
-            "certificate" to 3, "transcript" to 5, "marksheet" to 5, "semester" to 2
+            "university" to 8, "college" to 8, "school" to 5, "degree" to 10,
+            "certificate" to 5, "transcript" to 10, "marksheet" to 10, "semester" to 5,
+            "diploma" to 10, "educational" to 5
         ),
         DocumentCategory.VEHICLE to mapOf(
-            "vehicle" to 3, "car" to 2, "motorcycle" to 2, "insurance" to 4, 
-            "registration" to 5, "service" to 2, "vin" to 4
+            "vehicle" to 8, "car" to 5, "motorcycle" to 5, "insurance" to 5, 
+            "registration" to 10, "service" to 5, "vin" to 10, "engine" to 5,
+            "chassis" to 10, "polution" to 10
         ),
         DocumentCategory.PROPERTY to mapOf(
-            "property" to 3, "rent" to 4, "lease" to 4, "agreement" to 2, 
-            "electricity" to 2, "utility" to 2, "mortgage" to 5
+            "property" to 8, "rent" to 8, "lease" to 8, "agreement" to 5, 
+            "electricity" to 5, "utility" to 5, "mortgage" to 10, "deed" to 10,
+            "tax receipt" to 8, "water bill" to 8
         )
     )
 
     /**
      * Analyzes the text and assigns the most likely category.
-     * @param text The full OCR text of the document.
-     * @return The determined DocumentCategory.
+     * Higher weights for unique identifiers to prevent misclassification.
      */
     fun classify(text: String): DocumentCategory {
         val scores = mutableMapOf<DocumentCategory, Int>()
         val lowerText = text.lowercase()
+
+        // Give extra weight to strong medical indicators if they appear with receipt terms
+        val medicalWeightBoost = if (lowerText.contains("prescription") || lowerText.contains("lab report")) 10 else 0
 
         categoryKeywords.forEach { (category, keywords) ->
             var categoryScore = 0
@@ -55,17 +61,20 @@ class CategoryClassifier {
                     categoryScore += weight
                 }
             }
+            
+            if (category == DocumentCategory.MEDICAL) {
+                categoryScore += medicalWeightBoost
+            }
+            
             scores[category] = categoryScore
         }
 
-        // Find the category with the highest score
-        val topCategory = scores.maxByOrNull { it.value }?.key
-
-        // If no keywords matched, or scores are all zero, return Other
-        return if (scores.values.sum() == 0 || topCategory == null) {
+        val topCategory = scores.maxByOrNull { it.value }
+        
+        return if (topCategory == null || topCategory.value == 0) {
             DocumentCategory.OTHER
         } else {
-            topCategory
+            topCategory.key
         }
     }
 }

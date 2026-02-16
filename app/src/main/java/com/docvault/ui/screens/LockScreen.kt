@@ -32,11 +32,9 @@ fun LockScreen(
     var inputPin by remember { mutableStateOf("") }
     
     // ✨ AUTO-TRIGGER BIOMETRIC POPUP ✨
-    // This runs once when the screen first appears
     LaunchedEffect(Unit) {
-    println("LockScreen: Attempting to trigger biometric...")
-    onBiometricClick()
-}
+        onBiometricClick()
+    }
     
     // Clear PIN when an error is shown
     LaunchedEffect(pinError) {
@@ -57,9 +55,9 @@ fun LockScreen(
 
     fun addDigit(d: Char) {
         if (isLoading) return
-        if (inputPin.length < 4) {
+        if (inputPin.length < 6) {
             inputPin += d
-            if (inputPin.length == 4) {
+            if (inputPin.length == 6) {
                 onPinEntered(inputPin)
             }
         }
@@ -104,7 +102,7 @@ fun LockScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Enter your PIN",
+                    text = "Enter your 6-digit PIN",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
                 )
@@ -201,7 +199,7 @@ fun LockScreen(
 @Composable
 private fun PinDots(length: Int) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        repeat(4) { index ->
+        repeat(6) { index ->
             val filled = index < length
             Surface(
                 shape = CircleShape,

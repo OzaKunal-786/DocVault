@@ -19,7 +19,9 @@ fun SettingsScreen(
     viewModel: AppViewModel,
     onBackupClick: () -> Unit,
     onRestoreClick: () -> Unit,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onChangePinClick: () -> Unit,
+    onAddMonitoredFolderClick: () -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -36,8 +38,8 @@ fun SettingsScreen(
             SettingsItem(
                 icon = Icons.Outlined.Lock,
                 title = "Change PIN",
-                subtitle = "Update your 4-digit security code",
-                onClick = { /* TODO: Week 7 Day 7 */ }
+                subtitle = "Update your 6-digit security code",
+                onClick = onChangePinClick
             )
             SettingsItem(
                 icon = Icons.Outlined.Fingerprint,
@@ -47,9 +49,15 @@ fun SettingsScreen(
                 onToggle = { viewModel.onBiometricEnabled() }
             )
 
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingsCategory("Data & Backup")
+            SettingsItem(
+                icon = Icons.Outlined.FolderSpecial,
+                title = "Monitored Folders",
+                subtitle = "Choose folders to scan for documents",
+                onClick = onAddMonitoredFolderClick
+            )
             SettingsItem(
                 icon = Icons.Outlined.Backup,
                 title = "Backup Vault",
@@ -63,7 +71,22 @@ fun SettingsScreen(
                 onClick = onRestoreClick
             )
 
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            SettingsCategory("Scanning")
+            Text(
+                "Scan Interval: ${viewModel.scanIntervalHours} hours",
+                modifier = Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Slider(
+                value = viewModel.scanIntervalHours.toFloat(),
+                onValueChange = { viewModel.setScanInterval(it.toInt()) },
+                valueRange = 1f..168f, // 1 hour to 1 week
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingsCategory("App Info")
             SettingsItem(

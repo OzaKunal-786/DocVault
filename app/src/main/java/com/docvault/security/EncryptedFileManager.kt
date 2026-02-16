@@ -3,6 +3,8 @@ package com.docvault.security
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -14,7 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Handles per-file encryption using AES-256-GCM.
- * Keys are stored in the Android Keystore system.
+ * Reliable implementation with buffered streams and proper MAC handling.
  */
 class EncryptedFileManager(private val context: Context) {
 
@@ -24,12 +26,10 @@ class EncryptedFileManager(private val context: Context) {
     companion object {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val AES_MODE = "AES/GCM/NoPadding"
+        private const val AUTH_TAG_LENGTH = 128
     }
 
-    /**
-     * Encrypts a file and saves it to the vault.
-     */
-    fun encryptAndStore(sourceFile: File, documentId: String, isThumbnail: Boolean = false): File? {
+    suspend fun encryptAndStore(sourceFile: File, documentId: String, isThumbnail: Boolean = false): File? = withContext(Dispatchers.IO) {
         try {
             val key = getOrCreateKey(documentId)
             val cipher = Cipher.getInstance(AES_MODE)
@@ -40,7 +40,6 @@ class EncryptedFileManager(private val context: Context) {
             val destinationFile = File(destinationDir, "$documentId.vault")
 
             FileOutputStream(destinationFile).use { fos ->
-                // Write the IV (initialization vector) first so we can decrypt later
                 fos.write(iv.size)
                 fos.write(iv)
 
@@ -48,46 +47,46 @@ class EncryptedFileManager(private val context: Context) {
                 FileInputStream(sourceFile).use { fis ->
                     fis.copyTo(cipherOutputStream)
                 }
+                // Important: Close CipherOutputStream to flush and write Auth Tag
                 cipherOutputStream.close()
             }
-            return destinationFile
+            destinationFile
         } catch (e: Exception) {
             e.printStackTrace()
-            return null
+            null
         }
     }
 
-    /**
-     * Decrypts a file from the vault to a temporary file.
-     */
-    fun decryptToTemp(documentId: String, isThumbnail: Boolean = false): File? {
+    suspend fun decryptToTemp(documentId: String, isThumbnail: Boolean = false): File? = withContext(Dispatchers.IO) {
         try {
             val sourceDir = if (isThumbnail) thumbDir else vaultDir
             val sourceFile = File(sourceDir, "$documentId.vault")
-            if (!sourceFile.exists()) return null
+            if (!sourceFile.exists()) return@withContext null
 
             val key = getOrCreateKey(documentId)
             
             FileInputStream(sourceFile).use { fis ->
                 val ivSize = fis.read()
+                if (ivSize <= 0) return@withContext null
+                
                 val iv = ByteArray(ivSize)
                 fis.read(iv)
 
                 val cipher = Cipher.getInstance(AES_MODE)
-                val spec = GCMParameterSpec(128, iv)
+                val spec = GCMParameterSpec(AUTH_TAG_LENGTH, iv)
                 cipher.init(Cipher.DECRYPT_MODE, key, spec)
 
-                val tempFile = File(context.cacheDir, "temp_$documentId" + if (isThumbnail) "_thumb" else ".pdf")
+                val tempFile = File(context.cacheDir, "dec_${documentId}" + if (isThumbnail) "_thumb" else ".pdf")
                 val cipherInputStream = javax.crypto.CipherInputStream(fis, cipher)
                 
                 FileOutputStream(tempFile).use { fos ->
                     cipherInputStream.copyTo(fos)
                 }
-                return tempFile
+                tempFile
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            return null
+            null
         }
     }
 
