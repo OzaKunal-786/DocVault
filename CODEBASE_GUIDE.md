@@ -1,6 +1,6 @@
 # 🗺️ DocVault Codebase Guide: Advanced AI & Security Architecture
 
-Welcome to the internal map of DocVault. This guide explains the project structure, the purpose of every folder, and how the "magic" (AI and Security) actually happens under the hood.
+Welcome to the internal map of DocVault. This guide explains the project structure, the purpose of every folder, and how the "magic" (AI and Security) actually happens under the hood. My First ever project.
 
 ---
 
