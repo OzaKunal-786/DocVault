@@ -1,6 +1,7 @@
 package com.docvault.data.repository
 
 import android.content.Context
+import android.net.Uri
 import com.docvault.ai.CategoryClassifier
 import com.docvault.ai.MetadataExtractor
 import com.docvault.ai.OcrEngine
@@ -42,7 +43,6 @@ class ImportManager(
     private val _importStatus = MutableStateFlow<ImportStatus>(ImportStatus.Idle)
     val importStatus = _importStatus.asStateFlow()
 
-    // Limit concurrency strictly to 2 for heavy AI/PDF work to prevent OOM
     private val semaphore = Semaphore(2)
 
     suspend fun importFiles(files: List<FileScanner.ScannedFile>) = withContext(Dispatchers.IO) {
@@ -54,35 +54,33 @@ class ImportManager(
         val importedCount = AtomicInteger(0)
         val processedCount = AtomicInteger(0)
 
-        // Process in smaller chunks to keep memory usage predictable
         files.chunked(50).forEach { chunk ->
             coroutineScope {
                 chunk.map { scannedFile ->
                     async {
                         semaphore.withPermit {
                             try {
-                                // Skip if we already have this exact file
                                 if (!repository.isDuplicate(scannedFile.hash)) {
                                     val documentId = UUID.randomUUID().toString()
-                                    
-                                    // 1. Prepare PDF (Image to PDF or Copy existing PDF)
                                     val pdfFile = preparePdf(scannedFile, documentId)
 
                                     if (pdfFile != null && pdfFile.exists()) {
-                                        // 2. AI Analysis
+                                        // 1. Multi-Format AI Analysis
                                         val ocrText = if (scannedFile.mimeType.startsWith("image")) {
                                             ocrEngine.extractText(scannedFile.uri)
-                                        } else { "" } // PDF OCR planned for later
+                                        } else if (scannedFile.mimeType == "application/pdf") {
+                                            ocrEngine.extractTextFromPdf(scannedFile.uri)
+                                        } else {
+                                            ""
+                                        }
                                         
-                                        val metadata = metadataExtractor.extract(ocrText)
-                                        val smartTitle = titleGenerator.generateTitle(ocrText, metadata, scannedFile.name)
-                                        val category = categoryClassifier.classify(ocrText)
+                                        // 2. Intelligent Categorization using content + filename
+                                        val category = categoryClassifier.classify(ocrText, scannedFile.name)
 
                                         // 3. Encrypt and Store
                                         val vaultFile = encryptedFileManager.encryptAndStore(pdfFile, documentId)
                                         
                                         if (vaultFile != null) {
-                                            // 4. Record in Database
                                             val entity = DocumentEntity(
                                                 id = documentId,
                                                 originalPath = scannedFile.path,
@@ -90,21 +88,20 @@ class ImportManager(
                                                 originalHash = scannedFile.hash,
                                                 vaultFileName = vaultFile.name,
                                                 thumbnailFileName = null,
-                                                title = smartTitle,
+                                                // FIXED: Keep original filenames as requested
+                                                title = scannedFile.name.substringBeforeLast("."),
                                                 category = category.displayName,
                                                 extractedText = ocrText,
                                                 metadata = "{}", 
-                                                aiConfidence = 0.8f,
+                                                aiConfidence = 0.9f,
                                                 fileSize = pdfFile.length(),
-                                                mimeType = "application/pdf", // All vault docs are PDF
+                                                mimeType = "application/pdf",
                                                 sourceFolder = scannedFile.path.substringBeforeLast("/", "Unknown"),
                                                 isProcessed = true
                                             )
                                             repository.insertDocument(entity)
                                             importedCount.incrementAndGet()
                                         }
-                                        
-                                        // Cleanup TEMP file, NEVER the original
                                         pdfFile.delete()
                                     }
                                 }
@@ -118,12 +115,11 @@ class ImportManager(
                     }
                 }.awaitAll()
             }
-            // Small break between chunks to allow GC to collect
             yield()
         }
         
         _importStatus.value = ImportStatus.Success(importedCount.get())
-        delay(3000) // Keep success message for 3s
+        delay(3000)
         _importStatus.value = ImportStatus.Idle
     }
 
@@ -136,7 +132,6 @@ class ImportManager(
                 }
                 temp
             } else {
-                // Convert image to PDF
                 if (pdfConverter.convertImageToPdf(scannedFile.uri, temp)) temp else null
             }
         } catch (e: Exception) {

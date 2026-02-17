@@ -38,6 +38,13 @@ buildTypes {
     debug {
         isMinifyEnabled = false
         applicationIdSuffix = ".debug"
+        
+        // Enable 16 KB page alignment for development/debug builds on Android 15+
+        packaging {
+            jniLibs {
+                useLegacyPackaging = false
+            }
+        }
     }
 }
 
@@ -61,6 +68,10 @@ composeOptions {
 packaging {
     resources {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+    // Global setting for 16 KB alignment support
+    jniLibs {
+        useLegacyPackaging = false
     }
 }
 }
@@ -102,7 +113,7 @@ implementation(libs.coil.compose)
 implementation(libs.kotlinx.coroutines.android)
 implementation(libs.kotlinx.coroutines.play.services)
 
-// Document Management (New)
+// Document Management
 implementation(libs.documentfile)
 
 // Testing

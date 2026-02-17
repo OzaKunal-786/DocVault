@@ -13,16 +13,20 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.FolderCopy
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -50,136 +54,217 @@ class MainActivity : FragmentActivity() {
     private lateinit var cameraHelper: CameraHelper
     private var tempCameraFile: File? = null
 
-    // 1. Permission Launcher
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        viewModel.onPermissionsResult(allGranted)
-        if (allGranted) {
-            Toast.makeText(this, "Permissions Ready.", Toast.LENGTH_SHORT).show()
-            // FIXED: Initial scan no longer starts automatically.
-        }
+    // Launchers
+    private val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        viewModel.onPermissionsResult(permissions.values.all { it })
     }
 
-    // 2. Camera Launcher
-    private val cameraLauncher = registerForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success) {
-            tempCameraFile?.let { file ->
-                importSingleFile(Uri.fromFile(file), file.name)
-            }
-        }
+    private val cameraLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) tempCameraFile?.let { viewModel.openEditor(Uri.fromFile(it)) }
     }
 
-    // 3. File Picker Launcher
-    private val filePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            uris.forEach { uri ->
-                importSingleFile(uri, getFileName(uri))
-            }
-        }
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        uris.forEach { importSingleFile(it, getFileName(it)) }
     }
 
-    // 4. Folder Picker Launcher
-    private val folderPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
+    private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let {
-            contentResolver.takePersistableUriPermission(
-                it,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            // Save this folder to monitored list
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             viewModel.addMonitoredFolder(it.toString())
             startFolderScan(it)
         }
     }
 
-    // 5. Backup Launcher
-    private val backupLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/zip")
-    ) { uri ->
-        uri?.let {
-            lifecycleScope.launch {
-                val success = BackupManager(this@MainActivity).createBackup(it)
-                Toast.makeText(this@MainActivity, if(success) "Backup saved!" else "Backup failed", Toast.LENGTH_SHORT).show()
-            }
-        }
+    private val backupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        uri?.let { lifecycleScope.launch { BackupManager(this@MainActivity).createBackup(it) } }
     }
 
-    // 6. Restore Launcher
-    private val restoreLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        uri?.let {
-            lifecycleScope.launch {
-                val success = BackupManager(this@MainActivity).restoreBackup(it)
-                Toast.makeText(this@MainActivity, if(success) "Restore successful! Restarting..." else "Restore failed", Toast.LENGTH_LONG).show()
-                if (success) {
-                    finish()
-                    startActivity(Intent(this@MainActivity, MainActivity::class.java))
-                }
-            }
-        }
+    private val restoreLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { lifecycleScope.launch { if (BackupManager(this@MainActivity).restoreBackup(it)) { finish(); startActivity(intent) } } }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cameraHelper = CameraHelper(this)
-
         handleIntent(intent)
 
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_STOP -> {
-                    viewModel.onAppPaused()
-                    FileUtil.clearTempFiles(this)
-                }
-                Lifecycle.Event.ON_START -> {
-                    viewModel.onAppResumed()
-                    viewModel.checkPermissions(this)
-                }
-                else -> {}
-            }
+            if (event == Lifecycle.Event.ON_STOP) { viewModel.onAppPaused(); FileUtil.clearTempFiles(this) }
+            if (event == Lifecycle.Event.ON_START) { viewModel.onAppResumed(); viewModel.checkPermissions(this) }
         })
 
         setContent {
             DocVaultTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    when (viewModel.currentScreen) {
-                        is AppScreen.Onboarding -> {
-                            OnboardingScreen(onFinished = { viewModel.onOnboardingFinished() })
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val screen = viewModel.currentScreen
+                    when (screen) {
+                        is AppScreen.Onboarding -> OnboardingScreen { viewModel.onOnboardingFinished() }
+                        is AppScreen.PinSetup -> PinSetupScreen(onPinCreated = { viewModel.onPinCreated(it) }, onBiometricSetup = { viewModel.onBiometricEnabled() } )
+                        is AppScreen.Lock -> LockScreen(onPinEntered = { viewModel.onPinEntered(it) }, onBiometricClick = { triggerBiometric() }, showBiometric = viewModel.showBiometric, pinError = viewModel.pinError, isLoading = false)
+                        is AppScreen.Permission -> PermissionScreen { launchPermissionRequest() }
+                        is AppScreen.PdfViewer -> InternalPdfViewer(screen.docId)
+                        is AppScreen.EditDocument -> EditDocumentScreen(imageUri = screen.uri, onSave = { importSingleFile(it, getFileName(it)); viewModel.closeViewer() }, onBack = { viewModel.closeViewer() })
+                        is AppScreen.Home, is AppScreen.ChangePin -> MainAppContent(viewModel)
+                    }
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun MainAppContent(viewModel: AppViewModel) {
+        val navController = rememberNavController()
+        var showSettings by remember { mutableStateOf(false) }
+        var docToManage by remember { mutableStateOf<com.docvault.data.models.DocumentItem?>(null) }
+        var catToDelete by remember { mutableStateOf<String?>(null) }
+
+        if (showSettings) {
+            SettingsScreen(
+                viewModel = viewModel,
+                onBackupClick = { backupLauncher.launch("DocVault_Backup.zip") },
+                onRestoreClick = { restoreLauncher.launch(arrayOf("application/zip")) },
+                onBackClick = { showSettings = false },
+                onChangePinClick = { viewModel.onChangePinRequested() },
+                onAddMonitoredFolderClick = { launchFolderPicker() }
+            )
+        } else {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("DocVault", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                        actions = {
+                            IconButton(onClick = { triggerInitialScan() }) { Icon(Icons.Default.Refresh, "Refresh") }
+                            IconButton(onClick = { /* TODO */ }) { Icon(Icons.Default.Notifications, "Notifications") }
+                            IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Settings") }
                         }
-                        is AppScreen.PinSetup -> {
-                            PinSetupScreen(
-                                onPinCreated = { viewModel.onPinCreated(it) },
-                                onBiometricSetup = { viewModel.onBiometricEnabled() }
+                    )
+                },
+                bottomBar = {
+                    val items = listOf(
+                        BottomNavItem("Docs", Routes.HOME, Icons.Default.Description),
+                        BottomNavItem("All Files", Routes.ALL_FILES, Icons.Default.FolderCopy)
+                    )
+                    NavigationBar {
+                        val navBackStackEntry by navController.currentBackStackEntryAsState()
+                        val currentDestination = navBackStackEntry?.destination
+                        items.forEach { item ->
+                            NavigationBarItem(
+                                icon = { Icon(item.icon, contentDescription = item.name) },
+                                label = { Text(item.name) },
+                                selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
+                                onClick = {
+                                    navController.navigate(item.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
                             )
-                        }
-                        is AppScreen.Lock -> {
-                            LockScreen(
-                                onPinEntered = { viewModel.onPinEntered(it) },
-                                onBiometricClick = { triggerBiometric() },
-                                showBiometric = viewModel.showBiometric,
-                                pinError = viewModel.pinError,
-                                isLoading = false
-                            )
-                        }
-                        is AppScreen.Permission -> {
-                            PermissionScreen(onGrantClick = { launchPermissionRequest() })
-                        }
-                        is AppScreen.Home, is AppScreen.ChangePin -> {
-                            MainAppContent(viewModel)
                         }
                     }
                 }
+            ) { innerPadding ->
+                Box(modifier = Modifier.padding(innerPadding)) {
+                    AppNavGraph(
+                        navController = navController,
+                        appViewModel = viewModel,
+                        onAddCameraClick = { launchCamera() },
+                        onAddFileClick = { launchFilePicker() },
+                        onInitialImportClick = { triggerInitialScan() },
+                        onDocumentClick = { viewModel.openViewer(it) },
+                        onBackupClick = { backupLauncher.launch("DocVault_Backup.zip") },
+                        onRestoreClick = { restoreLauncher.launch(arrayOf("application/zip")) },
+                        onAddMonitoredFolderClick = { launchFolderPicker() },
+                        onSettingsClick = { showSettings = true },
+                        onDocumentLongClick = { docToManage = it },
+                        onCategoryLongClick = { catToDelete = it }
+                    )
+                }
+            }
+        }
+
+        // Dialogs
+        docToManage?.let { doc ->
+            var newName by remember { mutableStateOf(doc.title) }
+            AlertDialog(
+                onDismissRequest = { docToManage = null },
+                title = { Text("Manage Document") },
+                text = {
+                    Column {
+                        OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Rename") }, singleLine = true)
+                        Spacer(Modifier.height(16.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                IconButton(onClick = { 
+                                    docToManage = null
+                                    lifecycleScope.launch {
+                                        val file = DocVaultApplication.instance.encryptedFileManager.decryptToTemp(doc.id)
+                                        file?.let { viewModel.openEditor(Uri.fromFile(it)) }
+                                    }
+                                }) { Icon(Icons.Outlined.Edit, "Edit") }
+                                Text("Edit", style = MaterialTheme.typography.labelSmall)
+                            }
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                IconButton(onClick = { shareDocument(doc.id) }) { Icon(Icons.Outlined.Share, "Share") }
+                                Text("Share", style = MaterialTheme.typography.labelSmall)
+                            }
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                IconButton(onClick = { viewModel.deleteDocument(doc.id); docToManage = null }) { 
+                                    Icon(Icons.Outlined.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                                }
+                                Text("Delete", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { viewModel.renameDocument(doc.id, newName); docToManage = null }) { Text("Save Name") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { docToManage = null }) { Text("Cancel") }
+                }
+            )
+        }
+
+        catToDelete?.let { cat ->
+            AlertDialog(
+                onDismissRequest = { catToDelete = null },
+                title = { Text("Delete Category?") },
+                text = { Text("Are you sure you want to delete '$cat'?") },
+                confirmButton = {
+                    Button(onClick = { viewModel.deleteCategory(cat); catToDelete = null }) { Text("Delete") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { catToDelete = null }) { Text("Cancel") }
+                }
+            )
+        }
+    }
+
+    @Composable
+    private fun InternalPdfViewer(docId: String) {
+        var file by remember { mutableStateOf<File?>(null) }
+        var title by remember { mutableStateOf("") }
+        LaunchedEffect(docId) {
+            val entity = DocVaultApplication.instance.repository.getDocumentById(docId)
+            title = entity?.effectiveTitle() ?: "Document"
+            file = DocVaultApplication.instance.encryptedFileManager.decryptToTemp(docId)
+        }
+        if (file != null) {
+            PdfViewerScreen(file = file!!, title = title, onBack = { viewModel.closeViewer() }, onDelete = { viewModel.deleteDocument(docId) }, onShare = { shareDocument(docId) }, onUpdateCategory = { viewModel.updateCategory(docId, it) })
+        } else {
+            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }
+        }
+    }
+
+    private fun shareDocument(docId: String) {
+        lifecycleScope.launch {
+            val file = DocVaultApplication.instance.encryptedFileManager.decryptToTemp(docId)
+            if (file != null) {
+                val uri = cameraHelper.getUriForFile(file)
+                val intent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                startActivity(Intent.createChooser(intent, "Share Document"))
             }
         }
     }
@@ -188,25 +273,13 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             val scanner = FileScanner(this@MainActivity)
             val found = scanner.scanForDocuments()
-            if (found.isNotEmpty()) {
-                DocVaultApplication.instance.importManager.importFiles(found)
-            } else {
-                Toast.makeText(this@MainActivity, "No documents found in default folders.", Toast.LENGTH_SHORT).show()
-            }
+            if (found.isNotEmpty()) DocVaultApplication.instance.importManager.importFiles(found)
         }
     }
 
     private fun importSingleFile(uri: Uri, name: String) {
         lifecycleScope.launch {
-            val scannedFile = FileScanner.ScannedFile(
-                uri = uri,
-                name = name,
-                path = uri.path ?: "",
-                size = 0,
-                mimeType = contentResolver.getType(uri) ?: "application/octet-stream",
-                dateModified = System.currentTimeMillis(),
-                hash = uri.toString() + System.currentTimeMillis()
-            )
+            val scannedFile = FileScanner.ScannedFile(uri = uri, name = name, path = uri.path ?: "", size = 0, mimeType = contentResolver.getType(uri) ?: "application/octet-stream", dateModified = System.currentTimeMillis(), hash = uri.toString() + System.currentTimeMillis())
             DocVaultApplication.instance.importManager.importFiles(listOf(scannedFile))
         }
     }
@@ -215,19 +288,10 @@ class MainActivity : FragmentActivity() {
         var result: String? = null
         if (uri.scheme == "content") {
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    result = cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
-                }
+                if (cursor.moveToFirst()) result = cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
             }
         }
-        if (result == null) {
-            result = uri.path
-            val cut = result?.lastIndexOf('/') ?: -1
-            if (cut != -1) {
-                result = result?.substring(cut + 1)
-            }
-        }
-        return result ?: "unknown_file"
+        return result ?: uri.path?.substringAfterLast('/') ?: "unknown"
     }
 
     private fun startFolderScan(uri: Uri) {
@@ -239,130 +303,29 @@ class MainActivity : FragmentActivity() {
     }
 
     fun launchCamera() {
-        try {
-            val file = cameraHelper.createTempImageFile()
-            tempCameraFile = file
-            val uri = cameraHelper.getUriForFile(file)
-            cameraLauncher.launch(uri)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Camera Error: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
+        val file = cameraHelper.createTempImageFile()
+        tempCameraFile = file
+        cameraLauncher.launch(cameraHelper.getUriForFile(file))
     }
 
-    fun launchFilePicker() {
-        filePickerLauncher.launch("*/*")
-    }
+    fun launchFilePicker() = filePickerLauncher.launch("*/*")
+    fun launchFolderPicker() = folderPickerLauncher.launch(null)
 
-    fun launchFolderPicker() {
-        folderPickerLauncher.launch(null)
-    }
-
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        intent?.let { handleIntent(it) }
-    }
-
+    override fun onNewIntent(intent: Intent?) { super.onNewIntent(intent); intent?.let { handleIntent(it) } }
     private fun handleIntent(intent: Intent) {
         if (intent.action == Intent.ACTION_SEND) {
-            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            }
+            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
             uri?.let { importSingleFile(it, getFileName(it)) }
         }
     }
 
-    @Composable
-    fun MainAppContent(viewModel: AppViewModel) {
-        val navController = rememberNavController()
-        val navBackStackEntry by navController.currentBackStackEntryAsState()
-        val currentDestination = navBackStackEntry?.destination
-        
-        val items = listOf(
-            BottomNavItem("Docs", Routes.HOME, Icons.Default.Description),
-            BottomNavItem("Search", Routes.SEARCH, Icons.Default.Search),
-            BottomNavItem("Settings", Routes.SETTINGS, Icons.Default.Settings)
-        )
-
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    items.forEach { item ->
-                        NavigationBarItem(
-                            icon = { Icon(item.icon, contentDescription = item.name) },
-                            label = { Text(item.name) },
-                            selected = currentDestination?.hierarchy?.any { it.route == item.route } == true,
-                            onClick = {
-                                navController.navigate(item.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding)) {
-                AppNavGraph(
-                    navController = navController,
-                    appViewModel = viewModel,
-                    onAddCameraClick = { launchCamera() },
-                    onAddFileClick = { launchFilePicker() },
-                    onInitialImportClick = { triggerInitialScan() },
-                    onDocumentClick = { docId -> openDocument(docId) },
-                    onBackupClick = { backupLauncher.launch("DocVault_Backup.zip") },
-                    onRestoreClick = { restoreLauncher.launch(arrayOf("application/zip")) },
-                    onAddMonitoredFolderClick = { launchFolderPicker() }
-                )
-            }
-        }
-    }
-
-    private fun openDocument(docId: String) {
-        lifecycleScope.launch {
-            val file = DocVaultApplication.instance.encryptedFileManager.decryptToTemp(docId)
-            if (file != null && file.exists()) {
-                val uri = cameraHelper.getUriForFile(file)
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/pdf")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                try {
-                    startActivity(Intent.createChooser(intent, "Open Document"))
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "No PDF viewer found", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                Toast.makeText(this@MainActivity, "Error opening document", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
     private fun launchPermissionRequest() {
-        val permissions = mutableListOf(Manifest.permission.CAMERA)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
-        } else {
-            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-        requestPermissionLauncher.launch(permissions.toTypedArray())
+        val perms = mutableListOf(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms.add(Manifest.permission.READ_MEDIA_IMAGES) else perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        requestPermissionLauncher.launch(perms.toTypedArray())
     }
 
-    private fun triggerBiometric() {
-        DocVaultApplication.instance.biometricHelper.authenticate(
-            activity = this,
-            onSuccess = { viewModel.onBiometricSuccess() },
-            onError = { error -> viewModel.onBiometricError(error) }
-        )
-    }
+    private fun triggerBiometric() = DocVaultApplication.instance.biometricHelper.authenticate(activity = this, onSuccess = { viewModel.onBiometricSuccess() }, onError = { viewModel.onBiometricError(it) })
 }
 
-data class BottomNavItem(
-    val name: String,
-    val route: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
-)
+data class BottomNavItem(val name: String, val route: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)

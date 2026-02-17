@@ -11,14 +11,18 @@ import net.sqlcipher.database.SupportFactory
 @Database(
     entities = [
         DocumentEntity::class,
-        DocumentFtsEntity::class
+        DocumentFtsEntity::class,
+        CategoryEntity::class,
+        LearnedKeywordEntity::class
     ],
-    version = 1,
+    version = 3, // Incremented for LearnedKeywordEntity
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun documentDao(): DocumentDao
+    abstract fun categoryDao(): CategoryDao
+    abstract fun learnedKeywordDao(): LearnedKeywordDao
 
     companion object {
         @Volatile
@@ -26,9 +30,6 @@ abstract class AppDatabase : RoomDatabase() {
 
         private const val DATABASE_NAME = "docvault_encrypted.db"
 
-        /**
-         * Get (or create) the encrypted database instance.
-         */
         fun getInstance(context: Context, passphrase: ByteArray): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context, passphrase).also {

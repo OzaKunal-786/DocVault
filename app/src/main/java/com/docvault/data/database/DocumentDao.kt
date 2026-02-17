@@ -97,6 +97,9 @@ interface DocumentDao {
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteDocumentById(id: String)
 
+    @Query("DELETE FROM documents WHERE id IN (:ids)")
+    suspend fun deleteDocumentsByIds(ids: List<String>)
+
     @Query("DELETE FROM documents")
     suspend fun deleteAllDocuments()
 

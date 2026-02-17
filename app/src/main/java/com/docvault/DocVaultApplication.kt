@@ -19,33 +19,35 @@ import com.docvault.security.PinManager
 
 /**
  * Optimized Application class using lazy initialization for all heavy components.
- * This ensures the app launch remains under the 2-second target.
  */
 class DocVaultApplication : Application() {
 
     // ── Security Tools (Lazy) ──
-    val encryptionManager by lazy { EncryptionManager() }
+    val encryptionManager by lazy { EncryptionManager(this) }
     val pinManager by lazy { PinManager(this) }
     val biometricHelper by lazy { BiometricHelper(this) }
     val autoLockManager by lazy { AutoLockManager(pinManager) }
     val encryptedFileManager by lazy { EncryptedFileManager(this) }
 
     // ── AI & Processing Engines (Lazy) ──
-    // These are heavy and should ONLY be initialized when an import starts.
     val ocrEngine by lazy { OcrEngine(this) }
     val metadataExtractor by lazy { MetadataExtractor() }
-    val titleGenerator by lazy { TitleGenerator() }
+    val titleGenerator by lazy { TitleGenerator(ocrEngine) }
     val categoryClassifier by lazy { CategoryClassifier() }
     val pdfConverter by lazy { PdfConverter(this) }
 
     // ── Database & Repository (Lazy) ──
     val database by lazy {
-        val passphrase = encryptionManager.getDatabasePassphrase(this)
+        val passphrase = encryptionManager.getDatabasePassphrase()
         AppDatabase.getInstance(this, passphrase)
     }
 
     val repository by lazy {
-        DocumentRepository(database.documentDao())
+        DocumentRepository(
+            database.documentDao(), 
+            database.categoryDao(),
+            database.learnedKeywordDao()
+        )
     }
 
     // ── Coordinator (Lazy) ──
@@ -65,10 +67,6 @@ class DocVaultApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        
-        // We don't initialize anything here anymore. 
-        // Components will "wake up" automatically when first accessed.
-        // This makes the cold start extremely fast.
     }
 
     companion object {

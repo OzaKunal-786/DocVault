@@ -3,17 +3,20 @@ package com.docvault.ui.viewmodel
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.docvault.DocVaultApplication
+import com.docvault.data.database.CategoryEntity
 import com.docvault.data.database.DocumentEntity
 import com.docvault.data.models.CategoryItem
 import com.docvault.data.models.DocumentCategory
+import com.docvault.data.models.DocumentItem
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -24,6 +27,8 @@ sealed class AppScreen {
     object Home : AppScreen()
     object Permission : AppScreen()
     object ChangePin : AppScreen()
+    data class PdfViewer(val docId: String) : AppScreen()
+    data class EditDocument(val uri: Uri) : AppScreen()
 }
 
 class AppViewModel : ViewModel() {
@@ -37,18 +42,73 @@ class AppViewModel : ViewModel() {
     var showBiometric by mutableStateOf(false)
         private set
 
-    // --- Dashboard Data ---
+    // --- Selection Mode ---
+    val selectedDocumentIds = mutableStateListOf<String>()
+    var isSelectMode by mutableStateOf(false)
+        private set
+
+    fun toggleSelection(docId: String) {
+        if (selectedDocumentIds.contains(docId)) {
+            selectedDocumentIds.remove(docId)
+            if (selectedDocumentIds.isEmpty()) isSelectMode = false
+        } else {
+            selectedDocumentIds.add(docId)
+            isSelectMode = true
+        }
+    }
+
+    fun clearSelection() {
+        selectedDocumentIds.clear()
+        isSelectMode = false
+    }
+
+    fun deleteSelectedDocuments() {
+        viewModelScope.launch {
+            repository.deleteDocumentsByIds(selectedDocumentIds.toList())
+            clearSelection()
+        }
+    }
+
+    // --- Dashboard & Search ---
     private val repository = DocVaultApplication.instance.repository
     
-    val categories = repository.getCategoryCounts().map { counts ->
-        DocumentCategory.entries.map { category ->
+    var searchQuery by mutableStateOf("")
+        private set
+
+    fun onSearchQueryChange(newQuery: String) {
+        searchQuery = newQuery
+    }
+
+    val categories: StateFlow<List<CategoryItem>> = combine(
+        repository.getCategoryCounts(),
+        repository.getCustomCategories()
+    ) { counts, custom ->
+        val list = mutableListOf<CategoryItem>()
+        // 1. Built-in
+        DocumentCategory.entries.forEach { category ->
             val count = counts.find { it.effectiveCategory == category.displayName }?.count ?: 0
-            CategoryItem(category.emoji, category.displayName, count)
+            list.add(CategoryItem(category.emoji, category.displayName, count))
         }
+        // 2. Custom
+        custom.forEach { category ->
+            val count = counts.find { it.effectiveCategory == category.name }?.count ?: 0
+            list.add(CategoryItem(category.emoji, category.name, count))
+        }
+        list
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val recentDocuments = repository.getRecentDocuments(10)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // Filtered documents based on search query
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    val filteredDocuments = snapshotFlow { searchQuery }
+        .debounce(300)
+        .flatMapLatest { query ->
+            if (query.isEmpty()) {
+                repository.getRecentDocuments(20)
+            } else {
+                val sanitizedQuery = query.trim().split(" ").filter { it.isNotEmpty() }.joinToString(" ") { "$it*" }
+                repository.searchDocuments(sanitizedQuery)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     
     init {
         decideFirstScreen()
@@ -58,67 +118,62 @@ class AppViewModel : ViewModel() {
         val app = DocVaultApplication.instance
         val pinManager = app.pinManager
         
-        currentScreen = when {
-            !pinManager.isOnboardingComplete() -> AppScreen.Onboarding
-            !pinManager.isPinSet() -> AppScreen.PinSetup
-            else -> AppScreen.Lock
+        if (!pinManager.isOnboardingComplete()) {
+            currentScreen = AppScreen.Onboarding
+            return
         }
 
-        if (currentScreen == AppScreen.Lock) {
-            showBiometric = pinManager.isBiometricEnabled() && 
-                    app.biometricHelper.isBiometricAvailable()
+        if (!hasRequiredPermissions(app)) {
+            currentScreen = AppScreen.Permission
+            return
+        }
+
+        if (!pinManager.isPinSet()) {
+            currentScreen = AppScreen.PinSetup
+            return
+        }
+
+        currentScreen = AppScreen.Lock
+        showBiometric = pinManager.isBiometricEnabled() && 
+                app.biometricHelper.isBiometricAvailable()
+    }
+
+    private fun hasRequiredPermissions(context: Context): Boolean {
+        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.CAMERA)
+        } else {
+            listOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.CAMERA)
+        }
+        return perms.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
     }
 
     fun onOnboardingFinished() {
         val app = DocVaultApplication.instance
         app.pinManager.setOnboardingComplete(true)
-        
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.CAMERA)
-        } else {
-            listOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.CAMERA)
-        }
-
-        val allGranted = permissions.all {
-            ContextCompat.checkSelfPermission(app, it) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (allGranted) {
+        if (!hasRequiredPermissions(app)) {
+            currentScreen = AppScreen.Permission
+        } else if (!app.pinManager.isPinSet()) {
             currentScreen = AppScreen.PinSetup
         } else {
-            currentScreen = AppScreen.Permission
+            currentScreen = AppScreen.Lock
         }
     }
     
     fun checkPermissions(context: Context) {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.CAMERA)
-        } else {
-            listOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.CAMERA)
-        }
-
-        val allGranted = permissions.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (!allGranted && (currentScreen == AppScreen.Home)) {
+        if (!hasRequiredPermissions(context) && currentScreen == AppScreen.Home) {
             currentScreen = AppScreen.Permission
-        } else if (allGranted && currentScreen == AppScreen.Permission) {
-            if (!DocVaultApplication.instance.pinManager.isPinSet()) {
-                currentScreen = AppScreen.PinSetup
-            } else {
-                currentScreen = AppScreen.Home
-            }
         }
     }
 
     fun onPermissionsResult(granted: Boolean) {
         if (granted) {
-            if (!DocVaultApplication.instance.pinManager.isPinSet()) {
+            val app = DocVaultApplication.instance
+            if (!app.pinManager.isPinSet()) {
                 currentScreen = AppScreen.PinSetup
             } else {
-                currentScreen = AppScreen.Home
+                currentScreen = AppScreen.Lock
             }
         }
     }
@@ -176,27 +231,67 @@ class AppViewModel : ViewModel() {
     
     fun onAppResumed() {
         val app = DocVaultApplication.instance
-        if ((currentScreen == AppScreen.Home || currentScreen == AppScreen.Permission) && app.autoLockManager.shouldLock()) {
+        
+        // Don't auto-lock if we are in onboarding or setup flows
+        if (currentScreen == AppScreen.Onboarding || 
+            currentScreen == AppScreen.Permission || 
+            currentScreen == AppScreen.PinSetup) return
+
+        if (app.autoLockManager.shouldLock()) {
             currentScreen = AppScreen.Lock
             pinError = null
-            showBiometric = app.pinManager.isBiometricEnabled() && app.biometricHelper.isBiometricAvailable()
+            showBiometric = app.pinManager.isBiometricEnabled() && 
+                    app.biometricHelper.isBiometricAvailable()
         }
     }
 
-    // --- Settings / Monitored Folders ---
-    private val scanPrefs = DocVaultApplication.instance.getSharedPreferences("scan_settings", Context.MODE_PRIVATE)
-    
-    var scanIntervalHours by mutableStateOf(scanPrefs.getInt("scan_interval", 24))
-        private set
+    fun openViewer(docId: String) {
+        currentScreen = AppScreen.PdfViewer(docId)
+    }
 
+    fun closeViewer() {
+        currentScreen = AppScreen.Home
+    }
+
+    fun deleteDocument(docId: String) {
+        viewModelScope.launch {
+            repository.deleteDocumentById(docId)
+            currentScreen = AppScreen.Home
+        }
+    }
+
+    fun renameDocument(docId: String, newTitle: String) {
+        viewModelScope.launch {
+            repository.updateTitle(docId, newTitle)
+        }
+    }
+
+    fun updateCategory(docId: String, newCategory: String) {
+        viewModelScope.launch {
+            repository.updateCategory(docId, newCategory)
+        }
+    }
+
+    fun createCategory(name: String, emoji: String) {
+        viewModelScope.launch {
+            repository.addCategory(name, emoji)
+        }
+    }
+
+    fun deleteCategory(name: String) {
+        viewModelScope.launch {
+            repository.deleteCategory(CategoryEntity(name))
+        }
+    }
+
+    fun openEditor(uri: Uri) {
+        currentScreen = AppScreen.EditDocument(uri)
+    }
+
+    // --- Settings / Monitored Folders ---
     private val folderPrefs = DocVaultApplication.instance.getSharedPreferences("monitored_folders", Context.MODE_PRIVATE)
     private val _monitoredFolders = MutableStateFlow(folderPrefs.getStringSet("uris", emptySet()) ?: emptySet())
     val monitoredFolders = _monitoredFolders.asStateFlow()
-
-    fun setScanInterval(hours: Int) {
-        scanIntervalHours = hours
-        scanPrefs.edit().putInt("scan_interval", hours).apply()
-    }
 
     fun addMonitoredFolder(uri: String) {
         val newSet = _monitoredFolders.value.toMutableSet()
@@ -210,5 +305,21 @@ class AppViewModel : ViewModel() {
         newSet.remove(uri)
         _monitoredFolders.value = newSet
         folderPrefs.edit().putStringSet("uris", newSet).apply()
+    }
+
+    private val scanPrefs = DocVaultApplication.instance.getSharedPreferences("scan_settings", Context.MODE_PRIVATE)
+    var scanIntervalHours by mutableStateOf(scanPrefs.getInt("scan_interval", 24))
+        private set
+    var minFileSizeKB by mutableStateOf(scanPrefs.getInt("min_file_size", 80))
+        private set
+
+    fun setScanInterval(hours: Int) {
+        scanIntervalHours = hours
+        scanPrefs.edit().putInt("scan_interval", hours).apply()
+    }
+
+    fun setMinFileSize(kb: Int) {
+        minFileSizeKB = kb
+        scanPrefs.edit().putInt("min_file_size", kb).apply()
     }
 }

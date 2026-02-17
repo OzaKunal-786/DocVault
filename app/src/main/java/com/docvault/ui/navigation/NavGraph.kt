@@ -21,9 +21,7 @@ import java.util.Locale
 
 object Routes {
     const val HOME = "home"
-    const val SEARCH = "search"
-    const val SETTINGS = "settings"
-    const val CATEGORY_DETAIL = "category_detail/{categoryName}"
+    const val ALL_FILES = "all_files"
 }
 
 @Composable
@@ -36,13 +34,19 @@ fun AppNavGraph(
     onDocumentClick: (String) -> Unit,
     onBackupClick: () -> Unit,
     onRestoreClick: () -> Unit,
-    onAddMonitoredFolderClick: () -> Unit
+    onAddMonitoredFolderClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onDocumentLongClick: (DocumentItem) -> Unit,
+    onCategoryLongClick: (String) -> Unit
 ) {
     val categories by appViewModel.categories.collectAsState()
-    val recentDocsEntities by appViewModel.recentDocuments.collectAsState()
+    val filteredDocsEntities by appViewModel.filteredDocuments.collectAsState()
     val importStatus by DocVaultApplication.instance.importManager.importStatus.collectAsState()
+    val selectedIds = appViewModel.selectedDocumentIds
+    val isSelectMode = appViewModel.isSelectMode
+    val searchQuery = appViewModel.searchQuery
     
-    val recentDocuments = recentDocsEntities.map { entity ->
+    val displayDocuments = filteredDocsEntities.map { entity ->
         DocumentItem(
             id = entity.id,
             title = entity.effectiveTitle(),
@@ -67,21 +71,36 @@ fun AppNavGraph(
         composable(Routes.HOME) {
             HomeScreen(
                 categories = categories,
-                recentDocuments = recentDocuments,
                 importStatus = importStatus,
                 onCategoryClick = { category -> 
                     navController.navigate("category_detail/$category")
                 },
-                onSearchClick = { navController.navigate(Routes.SEARCH) },
+                onCategoryLongClick = onCategoryLongClick,
                 onAddCameraClick = onAddCameraClick,
                 onAddFileClick = onAddFileClick,
                 onInitialImportClick = onInitialImportClick,
-                onDocumentClick = onDocumentClick
+                onSettingsClick = onSettingsClick,
+                onNotificationsClick = { /* TODO */ }
+            )
+        }
+
+        composable(Routes.ALL_FILES) {
+            AllFilesScreen(
+                documents = displayDocuments,
+                selectedIds = selectedIds,
+                isSelectMode = isSelectMode,
+                onDocumentClick = onDocumentClick,
+                onToggleSelection = { appViewModel.toggleSelection(it) },
+                onDeleteSelected = { appViewModel.deleteSelectedDocuments() },
+                onClearSelection = { appViewModel.clearSelection() },
+                onSearchQueryChange = { appViewModel.onSearchQueryChange(it) },
+                searchQuery = searchQuery,
+                onDocumentLongClick = onDocumentLongClick
             )
         }
         
         composable(
-            route = Routes.CATEGORY_DETAIL,
+            route = "category_detail/{categoryName}",
             arguments = listOf(navArgument("categoryName") { type = NavType.StringType })
         ) { backStackEntry ->
             val categoryName = backStackEntry.arguments?.getString("categoryName") ?: ""
@@ -100,30 +119,14 @@ fun AppNavGraph(
             CategoryDetailScreen(
                 categoryName = categoryName,
                 documents = docs,
+                selectedIds = selectedIds,
+                isSelectMode = isSelectMode,
                 onBackClick = { navController.popBackStack() },
-                onDocumentClick = onDocumentClick
-            )
-        }
-        
-        composable(Routes.SEARCH) {
-            val searchViewModel: SearchViewModel = viewModel(
-                factory = SearchViewModelFactory(DocVaultApplication.instance.repository)
-            )
-            SearchScreen(
-                viewModel = searchViewModel,
-                onBackClick = { navController.popBackStack() },
-                onDocumentClick = onDocumentClick
-            )
-        }
-        
-        composable(Routes.SETTINGS) {
-            SettingsScreen(
-                viewModel = appViewModel,
-                onBackupClick = onBackupClick,
-                onRestoreClick = onRestoreClick,
-                onBackClick = { navController.popBackStack() },
-                onChangePinClick = { appViewModel.onChangePinRequested() },
-                onAddMonitoredFolderClick = onAddMonitoredFolderClick
+                onDocumentClick = onDocumentClick,
+                onToggleSelection = { appViewModel.toggleSelection(it) },
+                onDeleteSelected = { appViewModel.deleteSelectedDocuments() },
+                onClearSelection = { appViewModel.clearSelection() },
+                onDocumentLongClick = onDocumentLongClick
             )
         }
     }

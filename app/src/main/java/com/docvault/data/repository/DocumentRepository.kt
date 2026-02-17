@@ -1,19 +1,20 @@
-﻿// Location: app/src/main/java/com/docvault/data/repository/DocumentRepository.kt
+﻿// Location: app/src/main/java/com/docvault/data/repository
 
 package com.docvault.data.repository
 
-import com.docvault.data.database.CategoryCount
-import com.docvault.data.database.DocumentDao
-import com.docvault.data.database.DocumentEntity
+import com.docvault.data.database.*
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Single source of truth for all document operations.
- * All UI/ViewModel code should use this — never access DAO directly.
+ * Single source of truth for all document and category operations.
  */
-class DocumentRepository(private val documentDao: DocumentDao) {
+class DocumentRepository(
+    private val documentDao: DocumentDao,
+    private val categoryDao: CategoryDao,
+    private val learnedKeywordDao: LearnedKeywordDao
+) {
 
-    // ── READ ────────────────────────────────────────────
+    // ── DOCUMENTS: READ ─────────────────────────────────
 
     fun getAllDocuments(): Flow<List<DocumentEntity>> =
         documentDao.getAllDocuments()
@@ -39,7 +40,10 @@ class DocumentRepository(private val documentDao: DocumentDao) {
     fun getTotalSize(): Flow<Long?> =
         documentDao.getTotalSize()
 
-    // ── WRITE ───────────────────────────────────────────
+    suspend fun getAllDocumentsOnce(): List<DocumentEntity> =
+        documentDao.getAllDocumentsOnce()
+
+    // ── DOCUMENTS: WRITE ────────────────────────────────
 
     suspend fun insertDocument(document: DocumentEntity) =
         documentDao.insertDocument(document)
@@ -47,7 +51,7 @@ class DocumentRepository(private val documentDao: DocumentDao) {
     suspend fun insertDocuments(documents: List<DocumentEntity>) =
         documentDao.insertDocuments(documents)
 
-    // ── UPDATE ──────────────────────────────────────────
+    // ── DOCUMENTS: UPDATE ───────────────────────────────
 
     suspend fun updateCategory(id: String, newCategory: String) =
         documentDao.updateCategory(id, newCategory)
@@ -64,7 +68,7 @@ class DocumentRepository(private val documentDao: DocumentDao) {
     suspend fun updateDocument(document: DocumentEntity) =
         documentDao.updateDocument(document)
 
-    // ── DELETE ──────────────────────────────────────────
+    // ── DOCUMENTS: DELETE ───────────────────────────────
 
     suspend fun deleteDocument(document: DocumentEntity) =
         documentDao.deleteDocument(document)
@@ -72,8 +76,36 @@ class DocumentRepository(private val documentDao: DocumentDao) {
     suspend fun deleteDocumentById(id: String) =
         documentDao.deleteDocumentById(id)
 
+    suspend fun deleteDocumentsByIds(ids: List<String>) =
+        documentDao.deleteDocumentsByIds(ids)
+
     // ── DUPLICATE CHECK ─────────────────────────────────
 
     suspend fun isDuplicate(hash: String): Boolean =
         documentDao.existsByHash(hash)
+
+    // ── CUSTOM CATEGORIES ───────────────────────────────
+
+    fun getCustomCategories(): Flow<List<CategoryEntity>> =
+        categoryDao.getAllCategories()
+
+    suspend fun addCategory(name: String, emoji: String = "📁") =
+        categoryDao.insertCategory(CategoryEntity(name, emoji))
+
+    suspend fun deleteCategory(category: CategoryEntity) =
+        categoryDao.deleteCategory(category)
+
+    // ── LEARNED KEYWORDS ───────────────────────────────
+
+    fun getAllLearnedKeywords(): Flow<List<LearnedKeywordEntity>> =
+        learnedKeywordDao.getAllLearnedKeywords()
+
+    suspend fun getAllLearnedKeywordsOnce(): List<LearnedKeywordEntity> =
+        learnedKeywordDao.getAllLearnedKeywordsOnce()
+
+    suspend fun insertLearnedKeyword(keyword: LearnedKeywordEntity) =
+        learnedKeywordDao.insertLearnedKeyword(keyword)
+
+    suspend fun incrementKeywordFrequency(keyword: String) =
+        learnedKeywordDao.incrementFrequency(keyword)
 }

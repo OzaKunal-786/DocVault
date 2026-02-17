@@ -11,7 +11,8 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 
 /**
- * Optimized Scanner with strict filters to avoid "junk" files.
+ * Optimized Scanner that only looks for document types (PDF, DOC, etc.)
+ * and ignores media files like images and videos.
  */
 class FileScanner(private val context: Context) {
 
@@ -25,23 +26,28 @@ class FileScanner(private val context: Context) {
         val hash: String
     )
 
+    /**
+     * Scans the system MediaStore for documents in default folders.
+     * Default folders: Download, Documents, WhatsApp Documents.
+     */
     suspend fun scanForDocuments(): List<ScannedFile> = withContext(Dispatchers.IO) {
         val foundFiles = mutableListOf<ScannedFile>()
         
-        // Use MediaStore for speed
-        foundFiles.addAll(queryMediaStore(MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
-        
-        val docUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Files.getContentUri("external")
         } else {
             MediaStore.Files.getContentUri("external")
         }
-        foundFiles.addAll(queryMediaStore(docUri))
+        
+        foundFiles.addAll(queryMediaStore(collection))
 
-        // Deduplicate and strictly filter
+        // Deduplicate and filter for relevant folders and types
         foundFiles.distinctBy { it.hash }.filter { isValidDocument(it) }
     }
 
+    /**
+     * Recursively scans folders selected via SAF.
+     */
     suspend fun scanFolderRecursively(rootUri: Uri): List<ScannedFile> = withContext(Dispatchers.IO) {
         val foundFiles = mutableListOf<ScannedFile>()
         val rootDoc = DocumentFile.fromTreeUri(context, rootUri)
@@ -54,9 +60,8 @@ class FileScanner(private val context: Context) {
     private fun traverseFolder(folder: DocumentFile, results: MutableList<ScannedFile>) {
         folder.listFiles().forEach { file ->
             if (file.isDirectory) {
-                // Skip hidden or app-specific directories
                 if (!file.name?.startsWith(".")!!) traverseFolder(file, results)
-            } else if (isSupportedMimeType(file.type)) {
+            } else if (isDocumentMimeType(file.type)) {
                 val scanned = ScannedFile(
                     uri = file.uri,
                     name = file.name ?: "Unknown",
@@ -66,16 +71,17 @@ class FileScanner(private val context: Context) {
                     dateModified = file.lastModified(),
                     hash = generateHash(file.uri.toString(), file.length(), file.lastModified())
                 )
-                if (isValidDocument(scanned)) {
-                    results.add(scanned)
-                }
+                results.add(scanned)
             }
         }
     }
 
-    private fun isSupportedMimeType(mimeType: String?): Boolean {
-        return mimeType == "image/jpeg" || mimeType == "image/png" || 
-               mimeType == "application/pdf" || mimeType == "image/webp"
+    private fun isDocumentMimeType(mimeType: String?): Boolean {
+        return mimeType == "application/pdf" || 
+               mimeType == "application/msword" || 
+               mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+               mimeType == "text/plain" ||
+               mimeType == "application/rtf"
     }
 
     private fun queryMediaStore(collection: Uri): List<ScannedFile> {
@@ -89,8 +95,15 @@ class FileScanner(private val context: Context) {
             MediaStore.Files.FileColumns.DATE_MODIFIED
         )
 
-        val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} IN (?, ?, ?, ?)"
-        val args = arrayOf("image/jpeg", "image/png", "application/pdf", "image/webp")
+        // Only query for document MIME types
+        val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} IN (?, ?, ?, ?, ?)"
+        val args = arrayOf(
+            "application/pdf", 
+            "application/msword", 
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "application/rtf"
+        )
 
         context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
@@ -121,25 +134,19 @@ class FileScanner(private val context: Context) {
     }
 
     /**
-     * Strict filtering to ignore junk like WhatsApp Stickers, small icons, etc.
+     * Filters for default folders: Download, Document, WhatsApp Document.
      */
     private fun isValidDocument(file: ScannedFile): Boolean {
-        // 1. Minimum size: ignore files < 80KB (stickers/icons)
-        if (file.size < 80 * 1024) return false
-
         val path = file.path.lowercase()
-        val name = file.name.lowercase()
-
-        // 2. Ignore known junk folders/files
-        val junkTerms = listOf(
-            "sticker", "cache", "thumb", "temp", "icon", "emoji", 
-            "instagram", "sent", "private", "avatars", ".trashed"
-        )
-        if (junkTerms.any { path.contains(it) || name.contains(it) }) return false
-
-        // 3. Keep files from relevant locations
-        val relevantFolders = listOf("download", "documents", "whatsapp", "dcim", "pictures", "camera")
-        return relevantFolders.any { path.contains(it) }
+        
+        // Target default folders specifically
+        val isDefaultFolder = path.contains("download") || 
+                             path.contains("documents") || 
+                             path.contains("whatsapp documents")
+        
+        val isTrash = path.contains("cache") || path.contains(".thumbnails") || path.contains("temp")
+        
+        return isDefaultFolder && !isTrash
     }
 
     private fun generateHash(path: String, size: Long, date: Long): String {

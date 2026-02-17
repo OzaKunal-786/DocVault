@@ -10,7 +10,7 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Enhanced PdfConverter with automatic alignment and "Scanned" look enhancement.
+ * Enhanced PdfConverter with color support and better page fitting.
  */
 class PdfConverter(private val context: Context) {
 
@@ -19,17 +19,31 @@ class PdfConverter(private val context: Context) {
             val inputStream = context.contentResolver.openInputStream(imageUri)
             val originalBitmap = BitmapFactory.decodeStream(inputStream) ?: return@withContext false
             
-            // 1. Auto-Enhance for "Scanned" look (Grayscale + High Contrast)
-            val enhancedBitmap = enhanceBitmapForScan(originalBitmap)
+            // Auto-Enhance but keep COLORS
+            val enhancedBitmap = autoEnhanceBitmap(originalBitmap)
             
             val pdfDocument = PdfDocument()
             
-            // A4 standard size at 72 DPI is roughly 595x842. We'll fit the image to A4 or keep original aspect.
-            val pageInfo = PdfDocument.PageInfo.Builder(enhancedBitmap.width, enhancedBitmap.height, 1).create()
+            // Use standard A4 dimensions (at 72 DPI)
+            val a4Width = 595
+            val a4Height = 842
+            
+            // Calculate scale to fit image into A4 page while maintaining aspect ratio
+            val scale = minOf(a4Width.toFloat() / enhancedBitmap.width, a4Height.toFloat() / enhancedBitmap.height)
+            val finalWidth = (enhancedBitmap.width * scale).toInt()
+            val finalHeight = (enhancedBitmap.height * scale).toInt()
+            
+            val pageInfo = PdfDocument.PageInfo.Builder(a4Width, a4Height, 1).create()
             val page = pdfDocument.startPage(pageInfo)
             
             val canvas: Canvas = page.canvas
-            canvas.drawBitmap(enhancedBitmap, 0f, 0f, null)
+            
+            // Center the image on the A4 page
+            val left = (a4Width - finalWidth) / 2f
+            val top = (a4Height - finalHeight) / 2f
+            
+            val rect = RectF(left, top, left + finalWidth, top + finalHeight)
+            canvas.drawBitmap(enhancedBitmap, null, rect, Paint(Paint.FILTER_BITMAP_FLAG))
             
             pdfDocument.finishPage(page)
             
@@ -48,9 +62,10 @@ class PdfConverter(private val context: Context) {
     }
 
     /**
-     * Applies color management and filters to make images look like scanned documents.
+     * Enhances the bitmap while preserving color. 
+     * Adjusts contrast and brightness to make it look "scanned".
      */
-    private fun enhanceBitmapForScan(src: Bitmap): Bitmap {
+    private fun autoEnhanceBitmap(src: Bitmap): Bitmap {
         val width = src.width
         val height = src.height
         val dest = Bitmap.createBitmap(width, height, src.config)
@@ -58,24 +73,22 @@ class PdfConverter(private val context: Context) {
         val canvas = Canvas(dest)
         val paint = Paint()
         
-        // Color Matrix for high contrast and grayscale
         val cm = ColorMatrix()
-        cm.setSaturation(0f) // Grayscale
+        // Preserving saturation (color), but boosting contrast/brightness
+        val contrast = 1.2f
+        val brightness = 0f
         
-        val contrast = 1.5f // Increase contrast
-        val brightness = -10f // Adjust brightness
         val scale = contrast
         val translate = brightness
         
-        val contrastMatrix = floatArrayOf(
+        val matrix = floatArrayOf(
             scale, 0f, 0f, 0f, translate,
             0f, scale, 0f, 0f, translate,
             0f, 0f, scale, 0f, translate,
             0f, 0f, 0f, 1f, 0f
         )
         
-        cm.postConcat(ColorMatrix(contrastMatrix))
-        
+        cm.set(matrix)
         paint.colorFilter = ColorMatrixColorFilter(cm)
         canvas.drawBitmap(src, 0f, 0f, paint)
         
